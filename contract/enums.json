@@ -1,0 +1,103 @@
+{
+  "_comment": "Canonical state values shared by backend and Android. Tests on both sides fail if either drifts from this file.",
+  "TableStatus": [
+    "AVAILABLE",
+    "OCCUPIED",
+    "RESERVED",
+    "CLEANING",
+    "BLOCKED"
+  ],
+  "OrderStatus": [
+    "OPEN",
+    "BILLED",
+    "CLOSED",
+    "CANCELLED",
+    "MERGED"
+  ],
+  "OrderItemStatus": [
+    "PENDING",
+    "SENT",
+    "PREPARING",
+    "READY",
+    "SERVED",
+    "VOIDED"
+  ],
+  "TicketStatus": [
+    "NEW",
+    "ACCEPTED",
+    "PREPARING",
+    "READY",
+    "COMPLETED",
+    "CANCELLED"
+  ],
+  "BillStatus": [
+    "OPEN",
+    "PAID",
+    "PARTIALLY_REFUNDED",
+    "REFUNDED",
+    "VOID"
+  ],
+  "DiscountType": [
+    "PERCENT",
+    "FIXED"
+  ],
+  "PaymentKind": [
+    "PAYMENT",
+    "REFUND"
+  ],
+  "ErrorCode": [
+    "VALIDATION_ERROR",
+    "UNAUTHENTICATED",
+    "TOKEN_EXPIRED",
+    "INVALID_CREDENTIALS",
+    "ACCOUNT_LOCKED",
+    "ACCOUNT_INACTIVE",
+    "PERMISSION_DENIED",
+    "NOT_FOUND",
+    "CONFLICT",
+    "STALE_VERSION",
+    "INVALID_TRANSITION",
+    "IDEMPOTENCY_MISMATCH",
+    "RATE_LIMITED",
+    "INTERNAL_ERROR"
+  ],
+  "Permission": [
+    "dashboard.view",
+    "tables.view",
+    "tables.create",
+    "tables.update",
+    "tables.delete",
+    "tables.manage_status",
+    "orders.view",
+    "orders.create",
+    "orders.update",
+    "orders.cancel",
+    "orders.transfer",
+    "kitchen.view",
+    "kitchen.update",
+    "billing.view",
+    "billing.create",
+    "billing.discount",
+    "billing.void",
+    "billing.process_payment",
+    "billing.refund",
+    "menu.view",
+    "menu.create",
+    "menu.update",
+    "menu.set_availability",
+    "menu.delete",
+    "menu.manage_categories",
+    "staff.view",
+    "staff.create",
+    "staff.update",
+    "staff.deactivate",
+    "roles.view",
+    "roles.create",
+    "roles.update",
+    "roles.delete",
+    "reports.view",
+    "settings.view",
+    "settings.update",
+    "audit_logs.view"
+  ]
+}

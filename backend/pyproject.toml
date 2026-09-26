@@ -1,0 +1,53 @@
+[project]
+name = "bistro-api"
+version = "1.0.0"
+description = "Bistro restaurant operations API"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "fastapi>=0.141,<0.142",
+    "uvicorn[standard]>=0.54,<0.55",
+    "sqlalchemy>=2.1,<2.2",
+    "alembic>=1.20,<1.21",
+    "psycopg[binary]>=3.3,<3.4",
+    "pydantic>=2.13,<2.14",
+    "pydantic-settings>=2.15,<2.16",
+    "pyjwt>=2.15,<2.16",
+    "pwdlib[argon2]>=0.3,<0.4",
+    "structlog>=26.1,<27",
+    "tzdata>=2025.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1,<10",
+    "httpx>=0.28,<0.29",
+    "ruff>=0.16,<0.17",
+    "mypy>=2.3,<2.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "N", "ASYNC"]
+ignore = ["B008", "S101", "RUF012", "N818", "RUF001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311"]
+"migrations/**" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+strict = true
+ignore_missing_imports = true
+exclude = ["migrations/", "tests/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning:fastapi.testclient", "ignore:Using `httpx`"]
