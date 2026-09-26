@@ -72,7 +72,7 @@ fun <T> SegmentedControl(
         val segment = maxWidth / options.size
         val offset by animateDpAsState(segment * index, Motion.standard(), label = "seg")
         Box(
-            Modifier.offset(x = offset).width(segment).fillMaxHeight().clip(Radii.sm)
+            Modifier.offset { androidx.compose.ui.unit.IntOffset(offset.roundToPx(), 0) }.width(segment).fillMaxHeight().clip(Radii.sm)
                 .background(if (c.isDark) c.surfaceRaised else c.surface)
                 .border(1.dp, c.border, Radii.sm),
         )

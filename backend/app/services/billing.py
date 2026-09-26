@@ -82,7 +82,8 @@ def to_out(db: Session, bill: Bill) -> BillOut:
 
 
 def list_bills(db: Session, actor: Actor, *, statuses: list[BillStatus] | None,
-               since: datetime | None, limit: int, offset: int) -> tuple[list[BillSummary], int]:
+               since: datetime | None, paid_since: datetime | None, limit: int,
+               offset: int) -> tuple[list[BillSummary], int]:
     stmt = (select(Bill, Order.order_number, DiningTable.name)
             .join(Order, Order.id == Bill.order_id)
             .join(DiningTable, DiningTable.id == Order.table_id)
@@ -91,9 +92,13 @@ def list_bills(db: Session, actor: Actor, *, statuses: list[BillStatus] | None,
         stmt = stmt.where(Bill.status.in_(statuses))
     if since is not None:
         stmt = stmt.where(Bill.created_at >= since)
+    if paid_since is not None:
+        stmt = stmt.where(Bill.paid_at >= paid_since)
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    order_by = (Bill.paid_at.desc(), Bill.id.desc()) if paid_since is not None \
+        else (Bill.created_at.desc(), Bill.id.desc())
     rows = db.execute(stmt.options(joinedload(Bill.order).noload("*"))
-                      .order_by(Bill.created_at.desc(), Bill.id.desc())
+                      .order_by(*order_by)
                       .limit(limit).offset(offset)).all()
     return [BillSummary(
         id=b.id, bill_number=b.bill_number, status=b.status, order_id=b.order_id,

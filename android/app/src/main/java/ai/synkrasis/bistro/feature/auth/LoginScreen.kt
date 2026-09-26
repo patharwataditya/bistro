@@ -49,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -105,7 +106,7 @@ fun LoginScreen(notice: String?) {
     val vm = bistroViewModel { LoginViewModel(it) }
     val c = BistroTheme.colors
     val haptics = LocalHaptics.current
-    val passwordFocus = FocusRequester()
+    val passwordFocus = remember { FocusRequester() }
     Box(
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(listOf(c.accentSoft.copy(alpha = if (c.isDark) 0.35f else 0.7f), c.background, c.background)),

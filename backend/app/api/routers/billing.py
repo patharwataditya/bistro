@@ -30,11 +30,13 @@ def list_bills(
     actor: Annotated[Actor, Depends(require("billing.view"))],
     status_: Annotated[list[BillStatus] | None, Query(alias="status")] = None,
     since: datetime | None = None,
+    paid_since: datetime | None = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[BillSummary]:
-    items, total = billing.list_bills(db, actor, statuses=status_, since=since, limit=limit,
-                                      offset=offset)
+    """`since` filters on issue time, `paid_since` on settlement time (newest settled first)."""
+    items, total = billing.list_bills(db, actor, statuses=status_, since=since,
+                                      paid_since=paid_since, limit=limit, offset=offset)
     return Page(items=items, total=total, limit=limit, offset=offset)
 
 

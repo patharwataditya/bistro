@@ -445,3 +445,13 @@ def test_huge_ids_are_validation_errors(as_user):
     server = as_user("server")
     err(server.get("/orders/99999999999999999999"), 422, "VALIDATION_ERROR")
     err(server.post("/orders", json={"table_id": 99999999999999}), 422, "VALIDATION_ERROR")
+
+
+def test_bills_filter_by_settlement_time(as_user):
+    from datetime import UTC, datetime, timedelta
+    mgr = as_user("manager")
+    _paid(mgr)
+    billed(mgr, "T2")
+    since = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+    page = ok(mgr.get("/bills", params={"paid_since": since}))
+    assert page["total"] == 1 and page["items"][0]["status"] == "PAID"

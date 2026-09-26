@@ -1,0 +1,89 @@
+# Production stack: Caddy (TLS) → API → Postgres. Only Caddy publishes ports.
+name: bistro
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bistro
+      POSTGRES_USER: bistro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env.prod}
+    command:
+      - postgres
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=512MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=40
+      - -c
+      - wal_compression=on
+      - -c
+      - log_min_duration_statement=500
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bistro -d bistro"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    mem_limit: 512m
+    logging: *logging
+
+  api:
+    build:
+      context: ../backend
+    image: bistro-api:latest
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      BISTRO_ENVIRONMENT: production
+      BISTRO_DATABASE_URL: postgresql+psycopg://bistro:${POSTGRES_PASSWORD}@db:5432/bistro
+      BISTRO_JWT_SECRET: ${BISTRO_JWT_SECRET:?set in .env.prod}
+      BISTRO_LOG_LEVEL: INFO
+      BISTRO_WORKERS: "2"
+    networks: [backend, edge]
+    mem_limit: 640m
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      BISTRO_DOMAIN: ${BISTRO_DOMAIN:?set in .env.prod}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    mem_limit: 128m
+    logging: *logging
+
+networks:
+  backend:
+    internal: true   # the database has no route in or out
+  edge: {}
+
+volumes:
+  pgdata: {}
+  caddy_data: {}
+  caddy_config: {}

@@ -21,20 +21,26 @@ private val Context.sessionStore by preferencesDataStore(name = "session")
  * Keystore and never leaves it. The access token stays in memory. If the key is gone
  * (device restored, keystore reset) the stored token is simply unreadable: sign in again.
  */
-class TokenStore(private val context: Context) {
+interface TokenStorage {
+    suspend fun read(): String?
+    suspend fun write(token: String)
+    suspend fun clear()
+}
+
+class TokenStore(private val context: Context) : TokenStorage {
     private val key = stringPreferencesKey("refresh_token")
 
-    suspend fun read(): String? {
+    override suspend fun read(): String? {
         val stored = context.sessionStore.data.first()[key] ?: return null
         return runCatching { decrypt(stored) }.getOrNull()
     }
 
-    suspend fun write(token: String) {
+    override suspend fun write(token: String) {
         val sealed = encrypt(token)
         context.sessionStore.edit { it[key] = sealed }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         context.sessionStore.edit { it.remove(key) }
     }
 

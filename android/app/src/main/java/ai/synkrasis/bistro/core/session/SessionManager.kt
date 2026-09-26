@@ -42,7 +42,7 @@ interface AuthGateway {
  * persisted by [TokenStore]. Refreshes are single-flight: concurrent 401s share one refresh.
  */
 class SessionManager(
-    private val tokens: TokenStore,
+    private val tokens: TokenStorage,
     private val gateway: () -> AuthGateway,
     private val json: Json,
     private val scope: CoroutineScope,

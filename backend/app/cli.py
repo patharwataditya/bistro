@@ -4,9 +4,13 @@ import argparse
 import os
 import sys
 
+from sqlalchemy import select
+
 from app.core.config import get_settings
 from app.core.db import session_factory
-from app.seed import bootstrap, seed_demo, sync_reference_data
+from app.models import Location
+from app.seed import bootstrap, seed_demo, seed_sample_floor, sync_reference_data
+from app.services.auth import purge_throttles
 from app.services.idempotency import purge_expired
 
 
@@ -21,7 +25,8 @@ def main() -> int:
     boot.add_argument("--currency", default="USD")
     boot.add_argument("--owner-username", required=True)
     boot.add_argument("--owner-name", required=True)
-    sub.add_parser("demo", help="Load demo data (development only)")
+    sub.add_parser("demo", help="Load demo data with demo accounts (development only)")
+    sub.add_parser("sample-floor", help="Load sample tables/menu/taxes into the first location")
     sub.add_parser("purge-idempotency", help="Delete idempotency records older than 48h")
     args = parser.parse_args()
 
@@ -42,8 +47,15 @@ def main() -> int:
                 print("Refusing to load demo data in production.", file=sys.stderr)
                 return 2
             seed_demo(db)
+        elif args.command == "sample-floor":
+            location = db.scalar(select(Location).order_by(Location.id).limit(1))
+            if location is None:
+                print("Bootstrap first.", file=sys.stderr)
+                return 2
+            seed_sample_floor(db, location)
         elif args.command == "purge-idempotency":
             print(f"purged {purge_expired(db)}")
+            purge_throttles(db)
     print(f"{args.command}: done")
     return 0
 

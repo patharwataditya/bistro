@@ -69,6 +69,7 @@ interface BistroApi {
     // billing
     @GET("bills") suspend fun bills(
         @Query("status") statuses: List<String>?,
+        @Query("paid_since") paidSince: String?,
         @Query("limit") limit: Int,
         @Query("offset") offset: Int,
     ): Page<BillSummary>

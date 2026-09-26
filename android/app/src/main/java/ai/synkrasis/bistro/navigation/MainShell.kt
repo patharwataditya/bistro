@@ -58,7 +58,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavDestination.Companion.hasRoute
@@ -78,7 +77,8 @@ fun MainShell(container: AppContainer, state: SessionState.SignedIn) {
     val navigator = remember(nav) { Navigator(nav) }
     val messenger = remember { Messenger() }
     val haptics = LocalHaptics.current
-    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val wide = with(density) { androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp() } >= 600.dp
     val entry by nav.currentBackStackEntryAsState()
     val destination = entry?.destination
     val onTopLevel = tabs.any { tab -> destination?.hierarchy?.any { it.hasRoute(tab.route::class) } == true }

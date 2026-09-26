@@ -122,6 +122,14 @@ def seed_demo(db: Session) -> None:
         db.add(User(restaurant_id=location.restaurant_id, location_id=location.id,
                     username=username, full_name=full_name,
                     password_hash=hash_password(DEMO_PASSWORD), roles=[roles[role]]))
+    seed_sample_floor(db, location)
+
+
+def seed_sample_floor(db: Session, location: Location) -> None:
+    """Sample areas, tables, menu and taxes. Contains no accounts or credentials, so it is
+    safe to load into a fresh production location for evaluation."""
+    if db.scalar(select(DiningTable.id).where(DiningTable.location_id == location.id).limit(1)):
+        raise RuntimeError("This location already has tables.")
     location.service_charge_percent = Decimal("5.00")
     db.add_all([
         TaxRate(location_id=location.id, name="CGST", rate_percent=Decimal("2.5"), sort_order=0),

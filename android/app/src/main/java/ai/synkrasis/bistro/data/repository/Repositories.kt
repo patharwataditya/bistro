@@ -114,8 +114,13 @@ class KitchenRepository(private val api: BistroApi, private val call: ApiCaller)
 }
 
 class BillingRepository(private val api: BistroApi, private val call: ApiCaller) {
-    suspend fun list(statuses: List<BillStatus>?, limit: Int = 50, offset: Int = 0): ApiResult<ai.synkrasis.bistro.data.api.Page<BillSummary>> =
-        call { api.bills(statuses?.map { it.wire }, limit, offset) }
+    suspend fun list(
+        statuses: List<BillStatus>?,
+        limit: Int = 50,
+        offset: Int = 0,
+        paidSince: java.time.Instant? = null,
+    ): ApiResult<ai.synkrasis.bistro.data.api.Page<BillSummary>> =
+        call { api.bills(statuses?.map { it.wire }, paidSince?.toString(), limit, offset) }
     suspend fun create(key: String, orderId: Int, orderVersion: Int) = call { api.createBill(key, BillCreate(orderId, orderVersion)) }
     suspend fun get(id: Int) = call { api.bill(id) }
     suspend fun discount(bill: Bill, type: DiscountType?, value: BigDecimal?, reason: String?) =

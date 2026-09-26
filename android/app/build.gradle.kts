@@ -8,9 +8,9 @@ plugins {
 }
 
 /**
- * API endpoints. Production is HTTPS only (the network security config forbids cleartext);
- * a debug build can be pointed at a laptop with `bistro.debugApiUrl=http://192.168.x.x:8000/`
- * in local.properties, which is never committed.
+ * API endpoints. Every build is HTTPS only: the network security config forbids cleartext
+ * and the HTTP client refuses a non-HTTPS base URL. A debug build can be pointed at another
+ * HTTPS server with `bistro.debugApiUrl=...` in local.properties (never committed).
  */
 val localProps = Properties().apply {
     val f = rootProject.file("local.properties")
@@ -37,7 +37,7 @@ android {
         debug {
             applicationIdSuffix = ".debug"
             buildConfigField("String", "API_BASE_URL", "\"$debugApiUrl\"")
-            buildConfigField("boolean", "ALLOW_CLEARTEXT", "true")
+            buildConfigField("boolean", "ALLOW_CLEARTEXT", "false")
         }
         release {
             isMinifyEnabled = true
