@@ -15,7 +15,7 @@ class BillCreate(InputModel):
 
 class DiscountIn(InputModel):
     version: Version
-    type: Literal["PERCENT", "FIXED"] | None
+    type: Literal["PERCENT", "FIXED"] | None = None
     value: Annotated[Decimal | None, Field(gt=0, le=Decimal("9999999999.99"),
                                            decimal_places=2)] = None
     reason: Reason | None = None
@@ -65,6 +65,7 @@ class PaymentOut(OutputModel):
     change_due: Decimal
     reference: str | None
     reason: str | None
+    is_correction: bool
     created_by_name: str
     created_at: datetime
 

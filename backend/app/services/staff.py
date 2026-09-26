@@ -88,7 +88,7 @@ def role_editable(actor: Actor, role: Role, members: list[User]) -> bool:
 def _get_user(db: Session, actor: Actor, user_id: int, *, lock: bool = False) -> User:
     stmt = select(User).where(User.id == user_id, User.restaurant_id == actor.restaurant_id)
     if lock:
-        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(key_share=True).execution_options(populate_existing=True)
     user = db.scalar(stmt)
     if user is None:
         raise NotFound("Staff member not found.")
@@ -98,7 +98,7 @@ def _get_user(db: Session, actor: Actor, user_id: int, *, lock: bool = False) ->
 def _get_role(db: Session, actor: Actor, role_id: int, *, lock: bool = False) -> Role:
     stmt = select(Role).where(Role.id == role_id, Role.restaurant_id == actor.restaurant_id)
     if lock:
-        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(key_share=True).execution_options(populate_existing=True)
     role = db.scalar(stmt)
     if role is None:
         raise NotFound("Role not found.")

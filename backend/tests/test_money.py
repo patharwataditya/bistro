@@ -78,3 +78,10 @@ def test_no_floats_anywhere():
                 service_charge_percent=D("0"), service_charge_taxable=True, taxes=[],
                 rounding_increment=D("0.01"))
     assert b.total == D("0.30")  # 0.1 + 0.1 + 0.1 != 0.3 in binary floating point
+
+
+def test_positive_amount_never_rounds_to_zero():
+    b = compute([D("0.40")], discount_type=None, discount_value=None,
+                service_charge_percent=D("0"), service_charge_taxable=True, taxes=[],
+                rounding_increment=D("1.00"))
+    assert b.total == D("0.40") and b.round_off == D("0.00")

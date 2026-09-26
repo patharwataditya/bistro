@@ -291,3 +291,53 @@ def test_kitchen_cannot_take_orders(as_user):
     chef = as_user("chef")
     err(chef.post("/orders", json={"table_id": 1}), 403, "PERMISSION_DENIED")
     err(chef.get("/orders"), 403, "PERMISSION_DENIED")
+
+
+def test_split_rejects_served_item_whose_ticket_is_still_open(as_user):
+    server = as_user("server")
+    chef = as_user("chef")
+    o = fire(server, open_order(server, "T1", items=[("Burrata", 1), ("Tiramisu", 1)]))
+    advance(chef, board_ticket(chef, o["id"]), "PREPARING", "READY")
+    burrata = next(i for i in o["items"] if i["name"] == "Burrata")
+    o = ok(server.post(f"/orders/{o['id']}/items/{burrata['id']}/serve"))
+    err(server.post(f"/orders/{o['id']}/split", json={
+        "version": o["version"], "table_id": table_id(server, "T2"),
+        "item_ids": [burrata["id"]]}), 409, "INVALID_TRANSITION")
+
+
+def test_cancel_finishes_tickets_whose_rest_was_served(as_user):
+    server = as_user("server")
+    chef = as_user("chef")
+    o = fire(server, open_order(server, "T1", items=[("Burrata", 1), ("Tiramisu", 1)]))
+    advance(chef, board_ticket(chef, o["id"]), "PREPARING", "READY")
+    burrata = next(i for i in o["items"] if i["name"] == "Burrata")
+    o = ok(server.post(f"/orders/{o['id']}/items/{burrata['id']}/serve"))
+    mgr = as_user("manager")
+    tiramisu = next(i for i in o["items"] if i["name"] == "Tiramisu")
+    ok(mgr.post(f"/orders/{o['id']}/items/{tiramisu['id']}/void", json={"reason": "Dropped it"}))
+    board = ok(chef.get("/kitchen/tickets"))["tickets"]
+    t = next(t for t in board if t["order_id"] == o["id"])
+    assert t["status"] == "COMPLETED"
+
+
+def test_price_change_keeps_pending_lines_separate(as_user):
+    server = as_user("server")
+    o = open_order(server, "T1", items=[("Tiramisu", 1)])
+    owner = as_user("owner")
+    item = next(i for i in ok(owner.get("/menu"))["items"] if i["name"] == "Tiramisu")
+    ok(owner.patch(f"/menu/items/{item['id']}", json={"version": item["version"],
+                                                      "price": "300.00"}))
+    o = ok(server.post(f"/orders/{o['id']}/items", json={"items": [{"menu_item_id": item["id"]}]}))
+    assert [(i["quantity"], i["unit_price"]) for i in o["items"]] == [(1, "280.00"), (1, "300.00")]
+
+
+def test_sold_out_item_quantity_cannot_grow(as_user):
+    server = as_user("server")
+    o = open_order(server, "T1", items=[("Burrata", 1)])
+    chef = as_user("chef")
+    item = next(i for i in ok(chef.get("/menu"))["items"] if i["name"] == "Burrata")
+    ok(chef.post(f"/menu/items/{item['id']}/availability",
+                 json={"version": item["version"], "is_available": False}))
+    line = o["items"][0]
+    err(server.patch(f"/orders/{o['id']}/items/{line['id']}", json={"quantity": 5}), 422,
+        "VALIDATION_ERROR")

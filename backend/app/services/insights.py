@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Integer, cast, extract, func, select
+from sqlalchemy import Integer, Select, case, cast, extract, func, select
 from sqlalchemy.orm import Session
 
 from app.api.deps import Actor
@@ -41,6 +41,8 @@ from app.services.money import q
 ZERO = Decimal("0.00")
 PAID_STATES = (BillStatus.PAID, BillStatus.PARTIALLY_REFUNDED, BillStatus.REFUNDED)
 MAX_REPORT_DAYS = 366
+EARLIEST = date(2000, 1, 1)
+LATEST = date(2100, 12, 31)
 
 
 def _zone(actor: Actor) -> ZoneInfo:
@@ -58,18 +60,23 @@ def _dec(value: object) -> Decimal:
     return q(Decimal(str(value))) if value is not None else ZERO
 
 
+def _sales_refunds(location_id: int, lo: datetime, hi: datetime) -> Select[Decimal]:
+    """Refunds of settled sales in [lo, hi). Refunds that unwound a payment on a still-open
+    bill are corrections, not refunds of a sale, and are excluded."""
+    return (select(func.coalesce(func.sum(Payment.amount), 0))
+            .join(Bill, Bill.id == Payment.bill_id)
+            .where(Bill.location_id == location_id, Payment.kind == PaymentKind.REFUND,
+                   Payment.is_correction.is_(False),
+                   Payment.created_at >= lo, Payment.created_at < hi))
+
+
 def _net_sales(db: Session, location_id: int, lo: datetime, hi: datetime) -> tuple[Decimal, int]:
     gross, count = db.execute(
         select(func.coalesce(func.sum(Bill.total), 0), func.count())
         .where(Bill.location_id == location_id, Bill.status.in_(PAID_STATES),
                Bill.paid_at >= lo, Bill.paid_at < hi)
     ).one()
-    refunds = db.scalar(
-        select(func.coalesce(func.sum(Payment.amount), 0))
-        .join(Bill, Bill.id == Payment.bill_id)
-        .where(Bill.location_id == location_id, Payment.kind == PaymentKind.REFUND,
-               Payment.created_at >= lo, Payment.created_at < hi)
-    )
+    refunds = db.scalar(_sales_refunds(location_id, lo, hi))
     return _dec(gross) - _dec(refunds), int(count)
 
 
@@ -146,6 +153,8 @@ def report(db: Session, actor: Actor, start: date, end: date) -> ReportOut:
         raise ValidationFailed("The end date is before the start date.")
     if (end - start).days >= MAX_REPORT_DAYS:
         raise ValidationFailed("Reports can cover at most one year.")
+    if start < EARLIEST or end > LATEST:
+        raise ValidationFailed("Choose dates between 2000 and 2100.")
     zone = _zone(actor)
     lo, hi = day_bounds(start, end, zone)
     loc = actor.location_id
@@ -159,10 +168,7 @@ def report(db: Session, actor: Actor, start: date, end: date) -> ReportOut:
                func.coalesce(func.sum(Bill.tax_total), 0),
                func.coalesce(func.sum(Bill.service_charge_amount), 0)).where(*in_range)
     ).one()
-    refunds = db.scalar(select(func.coalesce(func.sum(Payment.amount), 0))
-                        .join(Bill, Bill.id == Payment.bill_id)
-                        .where(Bill.location_id == loc, Payment.kind == PaymentKind.REFUND,
-                               Payment.created_at >= lo, Payment.created_at < hi))
+    refunds = db.scalar(_sales_refunds(loc, lo, hi))
     guests = db.scalar(select(func.coalesce(func.sum(Order.guest_count), 0))
                        .join(Bill, Bill.order_id == Order.id).where(*in_range)) or 0
     cancelled = db.scalar(select(func.count()).where(
@@ -177,16 +183,27 @@ def report(db: Session, actor: Actor, start: date, end: date) -> ReportOut:
     daily_rows = db.execute(select(func.date(local_paid), func.sum(Bill.total), func.count())
                             .where(*in_range).group_by(func.date(local_paid))).all()
     daily_map = {d: (_dec(total), int(n)) for d, total, n in daily_rows}
+    local_refund = func.timezone(actor.location.timezone, Payment.created_at)
+    refund_rows = db.execute(
+        select(func.date(local_refund), func.sum(Payment.amount))
+        .join(Bill, Bill.id == Payment.bill_id)
+        .where(Bill.location_id == loc, Payment.kind == PaymentKind.REFUND,
+               Payment.is_correction.is_(False), Payment.created_at >= lo,
+               Payment.created_at < hi)
+        .group_by(func.date(local_refund))).all()
+    refund_map = {d: _dec(total) for d, total in refund_rows}
     daily = []
     cursor = start
     while cursor <= end:
-        total, n = daily_map.get(cursor, (ZERO, 0))
-        daily.append(DailySales(date=cursor, net_sales=total, orders=n))
+        gross_day, n = daily_map.get(cursor, (ZERO, 0))
+        refund_day = refund_map.get(cursor, ZERO)
+        daily.append(DailySales(date=cursor, gross_sales=gross_day, refunds=refund_day,
+                                net_sales=gross_day - refund_day, orders=n))
         cursor += timedelta(days=1)
     hour = cast(extract("hour", local_paid), Integer)
-    hourly_rows = dict((int(h), (_dec(t), int(n))) for h, t, n in db.execute(
-        select(hour, func.sum(Bill.total), func.count()).where(*in_range).group_by(hour)).all())
-    hourly = [HourlySales(hour=h, net_sales=hourly_rows.get(h, (ZERO, 0))[0],
+    hourly_rows = {int(h): (_dec(t), int(n)) for h, t, n in db.execute(
+        select(hour, func.sum(Bill.total), func.count()).where(*in_range).group_by(hour)).all()}
+    hourly = [HourlySales(hour=h, sales=hourly_rows.get(h, (ZERO, 0))[0],
                           orders=hourly_rows.get(h, (ZERO, 0))[1]) for h in range(24)]
 
     top = db.execute(
@@ -197,12 +214,14 @@ def report(db: Session, actor: Actor, start: date, end: date) -> ReportOut:
         .group_by(OrderItem.menu_item_id, OrderItem.name)
         .order_by(func.sum(OrderItem.quantity).desc(), OrderItem.name).limit(10)
     ).all()
+    # Money actually collected per method: payments in minus refunds out.
+    signed = case((Payment.kind == PaymentKind.REFUND, -Payment.amount), else_=Payment.amount)
     methods = db.execute(
-        select(Payment.method_name, func.count(), func.sum(Payment.amount))
+        select(Payment.method_name, func.count().filter(Payment.kind == PaymentKind.PAYMENT),
+               func.sum(signed))
         .join(Bill, Bill.id == Payment.bill_id)
-        .where(Bill.location_id == loc, Payment.kind == PaymentKind.PAYMENT,
-               Payment.created_at >= lo, Payment.created_at < hi)
-        .group_by(Payment.method_name).order_by(func.sum(Payment.amount).desc())
+        .where(Bill.location_id == loc, Payment.created_at >= lo, Payment.created_at < hi)
+        .group_by(Payment.method_name).order_by(func.sum(signed).desc())
     ).all()
     minutes = extract("epoch", Order.closed_at - Order.opened_at) / 60
     tables = db.execute(

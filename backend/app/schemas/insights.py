@@ -71,13 +71,17 @@ class TableUsage(OutputModel):
 
 class DailySales(OutputModel):
     date: date
+    gross_sales: Decimal
+    refunds: Decimal
     net_sales: Decimal
     orders: int
 
 
 class HourlySales(OutputModel):
+    """Gross sales by the local hour the bill was settled."""
+
     hour: int
-    net_sales: Decimal
+    sales: Decimal
     orders: int
 
 

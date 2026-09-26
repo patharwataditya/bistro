@@ -4,7 +4,7 @@ from sqlalchemy import ColumnElement, or_, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import Actor
-from app.core.errors import InvalidTransition, NotFound
+from app.core.errors import InvalidTransition, NotFound, StaleVersion
 from app.models import KitchenTicket, Order
 from app.models.enums import ACTIVE_TICKET_STATUSES, OrderItemStatus, OrderStatus, TicketStatus
 from app.schemas.kitchen import KitchenBoardOut, TicketItemOut, TicketOut
@@ -66,7 +66,8 @@ def get_ticket(db: Session, actor: Actor, ticket_id: int, *, lock: bool = False)
     stmt = select(KitchenTicket).where(KitchenTicket.id == ticket_id,
                                        KitchenTicket.location_id == actor.location_id)
     if lock:
-        stmt = stmt.with_for_update(of=KitchenTicket).execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(of=KitchenTicket, key_share=True).execution_options(
+            populate_existing=True)
     ticket = db.scalar(stmt)
     if ticket is None:
         raise NotFound("Ticket not found.")
@@ -79,10 +80,12 @@ def transition(db: Session, actor: Actor, ticket_id: int, to: TicketStatus,
     # so concurrent kitchen and floor actions queue instead of deadlocking.
     order_id = get_ticket(db, actor, ticket_id).order_id
     db.scalar(select(Order).where(Order.id == order_id)
-              .with_for_update(of=Order).execution_options(populate_existing=True))
+              .with_for_update(of=Order, key_share=True).execution_options(populate_existing=True))
     ticket = get_ticket(db, actor, ticket_id, lock=True)
-    db.refresh(ticket)
     db.refresh(ticket, attribute_names=["items"])
+    if ticket.order_id != order_id:
+        # A merge moved this ticket to another order between our read and our lock.
+        raise StaleVersion("ticket", ticket.version)
     current = TicketStatus(ticket.status)
     if current == to:
         # A double-tap or a retry of a request that already landed: report the state as-is.
@@ -111,6 +114,4 @@ def transition(db: Session, actor: Actor, ticket_id: int, to: TicketStatus,
                 item.status = target
     ticket.status = to
     bump(ticket)
-    # Item changes alter what the order screen shows; invalidate stale order edits too.
-    bump(ticket.order)
     return ticket

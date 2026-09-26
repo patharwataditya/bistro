@@ -25,6 +25,7 @@ from app.schemas.billing import (
     RefundIn,
     VoidBillIn,
 )
+from app.schemas.common import MAX_MONEY
 from app.schemas.orders import TaxLineOut
 from app.services import audit, floor, money
 from app.services import orders as order_service
@@ -37,7 +38,7 @@ ZERO = Decimal("0.00")
 def get_bill(db: Session, actor: Actor, bill_id: int, *, lock: bool = False) -> Bill:
     stmt = select(Bill).where(Bill.id == bill_id, Bill.location_id == actor.location_id)
     if lock:
-        stmt = stmt.with_for_update(of=Bill).execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(of=Bill, key_share=True).execution_options(populate_existing=True)
     bill = db.scalar(stmt)
     if bill is None:
         raise NotFound("Bill not found.")
@@ -71,6 +72,7 @@ def to_out(db: Session, bill: Bill) -> BillOut:
             id=p.id, kind=p.kind, payment_method_id=p.payment_method_id,
             method_name=p.method_name, amount=p.amount, tendered=p.tendered,
             change_due=p.change_due, reference=p.reference, reason=p.reason,
+            is_correction=p.is_correction,
             created_by_name=names.get(p.created_by_id, ""), created_at=p.created_at,
         ) for p in bill.payments],
         created_by_name=names.get(bill.created_by_id, ""), created_at=bill.created_at,
@@ -137,7 +139,7 @@ def create_bill(db: Session, actor: Actor, order_id: int, order_version: int) ->
     if not order_service.live_items(order):
         raise InvalidTransition("There's nothing to bill. Cancel the order instead.")
     location = db.scalar(select(Location).where(Location.id == actor.location_id)
-                         .with_for_update().execution_options(populate_existing=True))
+                         .with_for_update(key_share=True).execution_options(populate_existing=True))
     assert location is not None
     number = f"{location.bill_prefix}-{location.next_bill_number:06d}"
     location.next_bill_number += 1
@@ -150,6 +152,8 @@ def create_bill(db: Session, actor: Actor, order_id: int, order_version: int) ->
                 created_by_id=actor.id, taxes=[])
     _recompute(bill, order, location.rounding_increment,
                [(t.name, t.rate_percent) for t in active_tax_rates(db, location.id)])
+    if bill.total > MAX_MONEY:
+        raise ValidationFailed("This bill is larger than the system can record. Split the order.")
     db.add(bill)
     order.status = OrderStatus.BILLED
     order.billed_at = now()
@@ -173,9 +177,9 @@ def apply_discount(db: Session, actor: Actor, bill_id: int, data: DiscountIn) ->
     check_version(bill, data.version, "bill")
     if bill.status != BillStatus.OPEN:
         raise InvalidTransition("Only an unpaid bill can be discounted.")
-    if bill.paid_total > ZERO:
-        raise InvalidTransition("Payments have been taken on this bill. "
-                                "Discounts must be applied before payment.")
+    if bill.net_paid > ZERO:
+        raise InvalidTransition("Payments have been taken on this bill. Refund them first, "
+                                "then apply the discount.")
     if data.type == DiscountType.FIXED and data.value is not None and data.value > bill.subtotal:
         raise ValidationFailed("The discount is larger than the bill.")
     before = bill.total
@@ -200,7 +204,7 @@ def void_bill(db: Session, actor: Actor, bill_id: int, data: VoidBillIn) -> Bill
     check_version(bill, data.version, "bill")
     if bill.status != BillStatus.OPEN:
         raise InvalidTransition("Only an unpaid bill can be voided. Use a refund instead.")
-    if bill.paid_total > ZERO:
+    if bill.net_paid > ZERO:
         raise InvalidTransition("Payments have been taken on this bill. Refund them first.")
     bill.status = BillStatus.VOID
     bill.voided_at = now()
@@ -214,10 +218,13 @@ def void_bill(db: Session, actor: Actor, bill_id: int, data: VoidBillIn) -> Bill
     return bill
 
 
-def _method(db: Session, actor: Actor, method_id: int) -> PaymentMethod:
-    method = db.scalar(select(PaymentMethod).where(PaymentMethod.id == method_id,
-                                                   PaymentMethod.location_id == actor.location_id,
-                                                   PaymentMethod.is_active))
+def _method(db: Session, actor: Actor, method_id: int, *, active_only: bool = True
+            ) -> PaymentMethod:
+    stmt = select(PaymentMethod).where(PaymentMethod.id == method_id,
+                                       PaymentMethod.location_id == actor.location_id)
+    if active_only:
+        stmt = stmt.where(PaymentMethod.is_active)
+    method = db.scalar(stmt)
     if method is None:
         raise ValidationFailed("That payment method isn't available.")
     return method
@@ -260,7 +267,7 @@ def pay(db: Session, actor: Actor, bill_id: int, data: PaymentIn) -> Bill:
                       created_by_id=actor.id)
     db.add(payment)
     bill.paid_total += data.amount
-    if bill.paid_total >= bill.total:
+    if bill.net_paid >= bill.total:
         _settle(db, actor, bill, order)
     bump(bill)
     db.flush()
@@ -284,24 +291,42 @@ def settle_zero(db: Session, actor: Actor, bill_id: int, version: int) -> Bill:
     return bill
 
 
+def _refundable_by_method(bill: Bill) -> dict[int, Decimal]:
+    held: dict[int, Decimal] = {}
+    for p in bill.payments:
+        sign = Decimal(1) if p.kind == PaymentKind.PAYMENT else Decimal(-1)
+        held[p.payment_method_id] = held.get(p.payment_method_id, ZERO) + sign * p.amount
+    return held
+
+
 def refund(db: Session, actor: Actor, bill_id: int, data: RefundIn) -> Bill:
+    """Return money on the method it was taken with.
+
+    Allowed on a settled bill, and on an open one to unwind a mistaken payment (after which
+    the open bill can be corrected or voided again)."""
     bill, _ = _lock_bill_and_order(db, actor, bill_id)
     check_version(bill, data.version, "bill")
-    if bill.status not in (BillStatus.PAID, BillStatus.PARTIALLY_REFUNDED):
-        raise InvalidTransition("Only a paid bill can be refunded.")
-    refundable = bill.paid_total - bill.refunded_total
+    if bill.status not in (BillStatus.OPEN, BillStatus.PAID, BillStatus.PARTIALLY_REFUNDED):
+        raise InvalidTransition("This bill has nothing that can be refunded.")
+    # A method retired since the sale can still pay money back.
+    method = _method(db, actor, data.payment_method_id, active_only=False)
+    refundable = _refundable_by_method(bill).get(method.id, ZERO)
+    if refundable <= ZERO:
+        raise ValidationFailed(f"Nothing was paid by {method.name} on this bill.")
     if data.amount > refundable:
-        raise ValidationFailed(f"At most {refundable} can be refunded.",
+        raise ValidationFailed(f"At most {refundable} can be refunded by {method.name}.",
                                details={"refundable": str(refundable)})
-    method = _method(db, actor, data.payment_method_id)
+    was_open = bill.status == BillStatus.OPEN
     db.add(Payment(bill_id=bill.id, kind=PaymentKind.REFUND, payment_method_id=method.id,
                    method_name=method.name, amount=data.amount, change_due=ZERO,
-                   reason=data.reason, created_by_id=actor.id))
+                   reason=data.reason, is_correction=was_open, created_by_id=actor.id))
     bill.refunded_total += data.amount
-    bill.status = (BillStatus.REFUNDED if bill.refunded_total >= bill.paid_total
-                   else BillStatus.PARTIALLY_REFUNDED)
+    if not was_open:
+        bill.status = (BillStatus.REFUNDED if bill.refunded_total >= bill.paid_total
+                       else BillStatus.PARTIALLY_REFUNDED)
     bump(bill)
     audit.record(db, actor, "payment.refunded", "bill", bill.id,
-                 f"Refunded {data.amount} ({method.name}) on {bill.bill_number}",
+                 f"Refunded {data.amount} ({method.name}) on {bill.bill_number}"
+                 + (" before settlement" if was_open else ""),
                  amount=data.amount, method=method.name, reason=data.reason)
     return bill

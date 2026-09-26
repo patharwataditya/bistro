@@ -1,8 +1,11 @@
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import Actor
-from app.core.errors import NotFound, ValidationFailed
+from app.core.errors import NotFound, PermissionDenied, ValidationFailed
+from app.core.permissions import ALL
 from app.models import Location, PaymentMethod, Restaurant, TaxRate
 from app.schemas.settings import (
     PaymentMethodIn,
@@ -20,7 +23,7 @@ from app.services.common import bump, check_version
 def _location(db: Session, actor: Actor, *, lock: bool = False) -> Location:
     stmt = select(Location).where(Location.id == actor.location_id)
     if lock:
-        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(key_share=True).execution_options(populate_existing=True)
     location = db.scalar(stmt)
     assert location is not None
     return location
@@ -61,15 +64,23 @@ def get_settings_out(db: Session, actor: Actor) -> SettingsOut:
 def update_settings(db: Session, actor: Actor, data: SettingsUpdate) -> SettingsOut:
     location = _location(db, actor, lock=True)
     check_version(location, data.version, "settings")
-    changes = data.model_dump(exclude_unset=True, exclude={"version", "restaurant_name",
-                                                           "location_name"})
+    # Explicit nulls mean "no change", never "clear a required setting".
+    changes = data.model_dump(exclude_unset=True, exclude_none=True,
+                              exclude={"version", "restaurant_name", "location_name"})
+    if "rounding_increment" in changes:
+        changes["rounding_increment"] = Decimal(changes["rounding_increment"])
     before = {k: getattr(location, k) for k in changes}
     for key, value in changes.items():
         setattr(location, key, value)
     if data.location_name is not None:
         location.name = data.location_name
     if data.restaurant_name is not None:
-        restaurant = db.get(Restaurant, location.restaurant_id, with_for_update=True, populate_existing=True)
+        # The restaurant spans every location: renaming it needs full access, not just
+        # this location's settings permission.
+        if not actor.permissions >= ALL:
+            raise PermissionDenied("Only someone with full access can rename the restaurant.")
+        restaurant = db.get(Restaurant, location.restaurant_id,
+                            with_for_update={"key_share": True}, populate_existing=True)
         assert restaurant is not None
         restaurant.name = data.restaurant_name
     bump(location)

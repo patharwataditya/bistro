@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Release builds never send traffic in cleartext. Debug builds may talk to a laptop on the
+     LAN over HTTP (see bistro.debugApiUrl); OkHttp is additionally restricted in code. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

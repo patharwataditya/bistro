@@ -4,7 +4,7 @@ from sqlalchemy import Boolean, CheckConstraint, ForeignKey, Integer, Numeric, S
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base, TimestampMixin
-from app.models.enums import TableStatus, check_in
+from app.models.enums import TableStatus
 
 
 class Restaurant(TimestampMixin, Base):
@@ -22,7 +22,10 @@ class Location(TimestampMixin, Base):
         CheckConstraint("service_charge_percent >= 0 AND service_charge_percent <= 100",
                         name="service_charge_range"),
         CheckConstraint("rounding_increment > 0", name="rounding_positive"),
-        CheckConstraint(check_in("status_after_payment", TableStatus), name="after_payment_status"),
+        CheckConstraint("status_after_payment IN ('AVAILABLE', 'CLEANING')",
+                        name="after_payment_status"),
+        CheckConstraint("rounding_increment IN (0.01, 0.05, 0.10, 0.25, 0.50, 1.00)",
+                        name="rounding_allowed"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

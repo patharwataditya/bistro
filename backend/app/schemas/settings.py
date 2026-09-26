@@ -75,7 +75,7 @@ class SettingsUpdate(InputModel):
     currency_code: Annotated[str | None, StringConstraints(pattern=r"^[A-Z]{3}$")] = None
     service_charge_percent: Annotated[Decimal | None, Field(ge=0, le=100, decimal_places=2)] = None
     service_charge_taxable: bool | None = None
-    rounding_increment: Annotated[Decimal | None, Field(gt=0, le=100, decimal_places=2)] = None
+    rounding_increment: Literal["0.01", "0.05", "0.10", "0.25", "0.50", "1.00"] | None = None
     bill_prefix: Annotated[str | None, StringConstraints(pattern=r"^[A-Z0-9-]{1,12}$")] = None
     status_after_payment: Literal["AVAILABLE", "CLEANING"] | None = None
 

@@ -213,12 +213,12 @@ def test_refunds_partial_then_full(as_user):
     assert ok(mgr.get(f"/orders/{bill['order_id']}"))["status"] == "CLOSED"
 
 
-def test_refund_requires_paid_bill(as_user):
+def test_refund_needs_money_paid_by_that_method(as_user):
     mgr = as_user("manager")
     bill = billed(mgr)
     err(mgr.post(f"/bills/{bill['id']}/refunds", json={
         "version": bill["version"], "payment_method_id": card_id(mgr), "amount": "1.00",
-        "reason": "Nope nope"}), 409, "INVALID_TRANSITION")
+        "reason": "Nope nope"}), 422, "VALIDATION_ERROR")
 
 
 def test_paid_bill_rejects_more_payments(as_user):
@@ -294,7 +294,9 @@ def test_report_reflects_paid_bills_and_refunds(as_user):
     assert r["gross_sales"] == "893.02" and r["refunds"] == "93.02" and r["net_sales"] == "800.00"
     assert r["order_count"] == 1 and r["average_order_value"] == "893.02"
     assert r["top_items"][0]["name"] == "Tomato Basil Soup" and r["top_items"][0]["quantity"] == 2
-    assert r["payment_methods"] == [{"name": "Card", "count": 1, "amount": "893.02"}]
+    # Money actually held per method: the card payment minus the card refund.
+    assert r["payment_methods"] == [{"name": "Card", "count": 1, "amount": "800.00"}]
+    assert r["daily"][0]["gross_sales"] == "893.02" and r["daily"][0]["net_sales"] == "800.00"
     assert r["staff"][0]["name"] == "Maya Manager"
     assert len(r["hourly"]) == 24 and len(r["daily"]) == 1
     assert D(r["tax_total"]) == D("42.52")
@@ -340,3 +342,106 @@ def test_audit_log_listing_and_permission(as_user):
     older = ok(mgr.get("/audit-logs", params={"before_id": page["next_before_id"]}))
     assert all(e["id"] < page["next_before_id"] for e in older["items"])
     err(as_user("cashier").get("/audit-logs"), 403, "PERMISSION_DENIED")
+
+
+# ---------- regressions from review ----------
+
+def test_refund_goes_back_on_the_original_method(as_user):
+    mgr = as_user("manager")
+    bill = _paid(mgr)  # paid by card
+    err(mgr.post(f"/bills/{bill['id']}/refunds", json={
+        "version": bill["version"], "payment_method_id": cash_id(mgr), "amount": "10.00",
+        "reason": "Cash from drawer"}), 422, "VALIDATION_ERROR")
+
+
+def test_mistaken_partial_payment_can_be_unwound_then_voided(as_user):
+    cashier = as_user("cashier")
+    bill = billed(as_user("server"))
+    bill = ok(cashier.post(f"/bills/{bill['id']}/payments", json={
+        "version": bill["version"], "payment_method_id": card_id(cashier), "amount": "0.01"}))
+    owner = as_user("owner")
+    err(owner.post(f"/bills/{bill['id']}/void", json={"version": bill["version"],
+                                                    "reason": "Wrong table"}),
+        409, "INVALID_TRANSITION")
+    bill = ok(owner.post(f"/bills/{bill['id']}/refunds", json={
+        "version": bill["version"], "payment_method_id": card_id(owner), "amount": "0.01",
+        "reason": "Charged by mistake"}))
+    assert bill["status"] == "OPEN" and bill["balance_due"] == bill["total"]
+    bill = ok(owner.post(f"/bills/{bill['id']}/void", json={"version": bill["version"],
+                                                          "reason": "Wrong table"}))
+    assert bill["status"] == "VOID"
+
+
+def test_correction_refunds_do_not_count_as_sales_refunds(as_user):
+    mgr = as_user("manager")
+    bill = billed(mgr)
+    bill = ok(mgr.post(f"/bills/{bill['id']}/payments", json={
+        "version": bill["version"], "payment_method_id": card_id(mgr), "amount": "50.00"}))
+    bill = ok(mgr.post(f"/bills/{bill['id']}/refunds", json={
+        "version": bill["version"], "payment_method_id": card_id(mgr), "amount": "50.00",
+        "reason": "Wrong card"}))
+    bill = ok(mgr.post(f"/bills/{bill['id']}/payments", json={
+        "version": bill["version"], "payment_method_id": cash_id(mgr), "amount": bill["total"]}))
+    assert bill["status"] == "PAID"
+    today = ok(mgr.get("/dashboard"))["business_date"]
+    r = ok(mgr.get("/reports/summary", params={"start": today, "end": today}))
+    assert r["net_sales"] == bill["total"] and r["refunds"] == "0.00"
+
+
+def test_fully_refunded_bill_nets_to_zero_in_daily(as_user):
+    mgr = as_user("manager")
+    bill = _paid(mgr)
+    ok(mgr.post(f"/bills/{bill['id']}/refunds", json={
+        "version": bill["version"], "payment_method_id": card_id(mgr), "amount": bill["total"],
+        "reason": "Whole meal"}))
+    today = ok(mgr.get("/dashboard"))["business_date"]
+    r = ok(mgr.get("/reports/summary", params={"start": today, "end": today}))
+    assert r["net_sales"] == "0.00" and r["daily"][0]["net_sales"] == "0.00"
+
+
+def test_rounding_increment_is_whitelisted(as_user):
+    owner = as_user("owner")
+    s = ok(owner.get("/settings"))
+    err(owner.patch("/settings", json={"version": s["version"], "rounding_increment": "100"}),
+        422, "VALIDATION_ERROR")
+
+
+def test_null_settings_values_mean_no_change(as_user):
+    owner = as_user("owner")
+    s = ok(owner.get("/settings"))
+    s2 = ok(owner.patch("/settings", json={"version": s["version"], "timezone": None,
+                                           "location_name": "Harbour"}))
+    assert s2["timezone"] == s["timezone"] and s2["location_name"] == "Harbour"
+
+
+def test_restaurant_rename_needs_full_access(as_user):
+    admin = as_user("admin")
+    s = ok(admin.get("/settings"))
+    err(admin.patch("/settings", json={"version": s["version"], "restaurant_name": "Mine"}), 403,
+        "PERMISSION_DENIED")
+
+
+def test_equivalent_amounts_replay_under_same_key(as_user):
+    cashier = as_user("cashier")
+    bill = billed(as_user("server"))
+    h = {"Idempotency-Key": "decimal-form-123"}
+    first = ok(cashier.post(f"/bills/{bill['id']}/payments", headers=h, json={
+        "version": bill["version"], "payment_method_id": card_id(cashier), "amount": "10"}))
+    again = ok(cashier.post(f"/bills/{bill['id']}/payments", headers=h, json={
+        "version": bill["version"], "payment_method_id": card_id(cashier), "amount": "10.00"}))
+    assert again == first
+
+
+def test_kitchen_progress_does_not_stale_the_order(as_user):
+    server = as_user("server")
+    chef = as_user("chef")
+    o = fire(server, open_order(server, "T1", items=[("Burrata", 1)]))
+    advance(chef, board_ticket(chef, o["id"]), "PREPARING", "READY")
+    # The server's copy of the order (version from before the kitchen moved) still bills.
+    ok(server.post("/bills", json={"order_id": o["id"], "order_version": o["version"]}), 201)
+
+
+def test_huge_ids_are_validation_errors(as_user):
+    server = as_user("server")
+    err(server.get("/orders/99999999999999999999"), 422, "VALIDATION_ERROR")
+    err(server.post("/orders", json={"table_id": 99999999999999}), 422, "VALIDATION_ERROR")

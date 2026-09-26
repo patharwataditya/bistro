@@ -59,7 +59,7 @@ def get_item(db: Session, actor: Actor, item_id: int, *, lock: bool = False) -> 
     stmt = select(MenuItem).where(MenuItem.id == item_id,
                                   MenuItem.location_id == actor.location_id, MenuItem.is_active)
     if lock:
-        stmt = stmt.with_for_update().execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(key_share=True).execution_options(populate_existing=True)
     item = db.scalar(stmt)
     if item is None:
         raise NotFound("Menu item not found.")

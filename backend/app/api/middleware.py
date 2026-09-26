@@ -1,3 +1,4 @@
+import re
 import time
 import uuid
 
@@ -7,6 +8,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from app.core.logging import get_logger
 
 log = get_logger("bistro.http")
+_REQUEST_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
 class RequestContextMiddleware:
@@ -23,8 +25,7 @@ class RequestContextMiddleware:
 
         headers = dict(scope["headers"])
         incoming = headers.get(b"x-request-id", b"").decode(errors="ignore")
-        request_id = incoming if 8 <= len(incoming) <= 64 and incoming.isascii() \
-            else uuid.uuid4().hex
+        request_id = incoming if _REQUEST_ID.fullmatch(incoming) else uuid.uuid4().hex
         structlog.contextvars.bind_contextvars(request_id=request_id)
         start = time.perf_counter()
         status_holder = {"status": 500}

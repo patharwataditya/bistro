@@ -76,6 +76,9 @@ def compute(
     tax_total = sum((t.amount for t in tax_lines), ZERO)
     exact = net + service + tax_total
     total = round_to_increment(exact, rounding_increment)
+    if exact > ZERO and total == ZERO:
+        # Rounding exists to avoid awkward change, never to make a charge disappear.
+        total = q(exact)
     return Breakdown(
         subtotal=subtotal, discount_amount=discount,
         service_charge_percent=service_charge_percent, service_charge_amount=service,

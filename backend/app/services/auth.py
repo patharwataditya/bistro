@@ -116,11 +116,12 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     token = db.scalar(
         select(RefreshToken)
         .where(RefreshToken.token_hash == hash_refresh_token(refresh_token))
-        .with_for_update().execution_options(populate_existing=True)
+        .with_for_update(key_share=True).execution_options(populate_existing=True)
     )
     if token is None:
         raise Unauthenticated("Your session has ended. Sign in again.")
-    session = db.get(AuthSession, token.session_id, with_for_update=True, populate_existing=True)
+    session = db.get(AuthSession, token.session_id, with_for_update={"key_share": True},
+                     populate_existing=True)
     now = _now()
     if session is None or session.revoked_at is not None or session.expires_at <= now:
         raise Unauthenticated("Your session has ended. Sign in again.")

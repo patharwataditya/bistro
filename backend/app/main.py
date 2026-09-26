@@ -7,7 +7,7 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.middleware import RequestContextMiddleware
@@ -78,6 +78,11 @@ def create_app() -> FastAPI:
     async def integrity_error(_: Request, exc: IntegrityError) -> JSONResponse:
         log.warning("integrity_error", error=str(exc.orig)[:300])
         return _error(409, "CONFLICT", "That conflicts with existing data. Refresh and try again.")
+
+    @app.exception_handler(DataError)
+    async def data_error(_: Request, exc: DataError) -> JSONResponse:
+        # e.g. an id beyond the integer range: bad input, not a server fault.
+        return _error(422, "VALIDATION_ERROR", "Some values are out of range.")
 
     @app.exception_handler(OperationalError)
     async def db_unavailable(_: Request, exc: OperationalError) -> JSONResponse:

@@ -32,9 +32,12 @@ core/            config, db session, security (JWT/argon2), errors, logging, rba
 * Sync SQLAlchemy 2 + psycopg 3. One DB transaction per request (`get_db` commits on
   success, rolls back on any exception) — a failed payment can never half-apply.
 * Concurrency: every state transition loads the aggregate root with
-  `SELECT … FOR UPDATE` (order, ticket, bill, table) *and* checks a client-supplied
-  `version` (optimistic concurrency, `409 STALE_VERSION`). Two cashiers cannot both
-  close a bill; two cooks cannot both bump a ticket.
+  `SELECT … FOR NO KEY UPDATE` (order → ticket/bill → table, always in that order, so FK
+  key-share locks never deadlock against it) *and* checks a client-supplied `version`
+  (optimistic concurrency, `409 STALE_VERSION`). Two cashiers cannot both close a bill;
+  two cooks cannot both bump a ticket. Kitchen progress does not bump the order version.
+* Commits happen in `TransactionalRoute` *before* the response is sent, so a failed
+  commit is an error response, never a false success.
 * Idempotency: `Idempotency-Key` header on order creation, send-to-kitchen, bill
   creation and payments. Keys are stored per user+route with the response; a replay
   returns the original response, a key reused with a different body → 422.
@@ -79,8 +82,9 @@ Anti-escalation rules (enforced in `services/staff.py`, `services/roles.py`):
    cannot touch the owner).
 5. System roles (Owner) are immutable; the last active Owner cannot be removed.
 
-Default roles: Owner (all), Administrator (all but roles.delete/settings ownership),
-Manager, Cashier, Kitchen Staff, Floor Staff.
+Default roles: Owner (all), Administrator (all but roles.delete), Manager, Cashier,
+Kitchen Staff, Floor Staff. Restaurant-wide changes (renaming the restaurant) require the
+full permission set. Password resets require *strictly* more access than the target.
 
 ## 6. Domain state machines
 
@@ -104,10 +108,20 @@ going.
 `NEW→PREPARING` allowed, `* → CANCELLED` when every item on it is voided / order
 cancelled. Ticket transitions propagate to its items.
 
-**Bill**: `OPEN (issued) → PAID`, `OPEN → VOID` (no payments),
+**Bill**: `OPEN (issued) → PAID`, `OPEN → VOID` (nothing held),
 `PAID → REFUNDED / PARTIALLY_REFUNDED` via refund records. Multiple payments
 (split tender) allowed; bill becomes `PAID` in the same transaction that makes
-`paid ≥ total`, which also closes the order and moves the table to `CLEANING`.
+`net paid (payments − refunds) ≥ total`, which also closes the order and moves the table
+to the configured after-payment status (`CLEANING` or `AVAILABLE`).
+Refunds go back only on the method the money came in on (capped per method). A refund on a
+still-`OPEN` bill is a *correction* (unwinding a mistaken payment, flagged `is_correction`)
+so the bill can then be discounted or voided; corrections are not counted as sales refunds.
+Rounding increments are limited to 0.01/0.05/0.10/0.25/0.50/1.00, and a positive amount is
+never rounded to zero.
+
+**Reports**: gross sales = totals of bills settled in range (local calendar days);
+refunds = non-correction refunds made in range; net = gross − refunds (also per day).
+Payment-method figures are money held per method (payments − refunds).
 
 Bill math: `subtotal = Σ line totals (non-voided)`; `discount` (percent or fixed,
 ≤ subtotal, reason required); `service_charge = rate × (subtotal − discount)`;

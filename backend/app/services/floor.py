@@ -84,7 +84,7 @@ def get_table(db: Session, actor: Actor, table_id: int, *, lock: bool = False) -
                                      DiningTable.location_id == actor.location_id,
                                      DiningTable.is_active)
     if lock:
-        stmt = stmt.with_for_update(of=DiningTable).execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(of=DiningTable, key_share=True).execution_options(populate_existing=True)
     table = db.scalar(stmt)
     if table is None:
         raise NotFound("Table not found.")

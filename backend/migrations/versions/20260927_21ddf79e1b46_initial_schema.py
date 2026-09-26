@@ -1,8 +1,8 @@
 """initial schema
 
-Revision ID: b0ddf5f01e54
+Revision ID: 21ddf79e1b46
 Revises: 
-Create Date: 2026-09-27 00:52:13.440177
+Create Date: 2026-09-27 01:15:48.577666
 """
 from collections.abc import Sequence
 
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = 'b0ddf5f01e54'
+revision: str = '21ddf79e1b46'
 down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -57,8 +57,9 @@ def upgrade() -> None:
     sa.Column('version', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
-    sa.CheckConstraint("status_after_payment IN ('AVAILABLE', 'OCCUPIED', 'RESERVED', 'CLEANING', 'BLOCKED')", name=op.f('ck_locations_after_payment_status')),
+    sa.CheckConstraint("status_after_payment IN ('AVAILABLE', 'CLEANING')", name=op.f('ck_locations_after_payment_status')),
     sa.CheckConstraint('rounding_increment > 0', name=op.f('ck_locations_rounding_positive')),
+    sa.CheckConstraint('rounding_increment IN (0.01, 0.05, 0.10, 0.25, 0.50, 1.00)', name=op.f('ck_locations_rounding_allowed')),
     sa.CheckConstraint('service_charge_percent >= 0 AND service_charge_percent <= 100', name=op.f('ck_locations_service_charge_range')),
     sa.ForeignKeyConstraint(['restaurant_id'], ['restaurants.id'], name=op.f('fk_locations_restaurant_id_restaurants'), ondelete='RESTRICT'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_locations'))
@@ -415,6 +416,7 @@ def upgrade() -> None:
     sa.Column('change_due', sa.Numeric(precision=12, scale=2), nullable=False),
     sa.Column('reference', sa.String(length=80), nullable=True),
     sa.Column('reason', sa.String(length=200), nullable=True),
+    sa.Column('is_correction', sa.Boolean(), server_default='false', nullable=False),
     sa.Column('created_by_id', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("kind IN ('PAYMENT', 'REFUND')", name=op.f('ck_payments_kind_valid')),

@@ -47,7 +47,7 @@ FIRED = (OrderItemStatus.SENT, OrderItemStatus.PREPARING, OrderItemStatus.READY,
 def get_order(db: Session, actor: Actor, order_id: int, *, lock: bool = False) -> Order:
     stmt = select(Order).where(Order.id == order_id, Order.location_id == actor.location_id)
     if lock:
-        stmt = stmt.with_for_update(of=Order).execution_options(populate_existing=True)
+        stmt = stmt.with_for_update(of=Order, key_share=True).execution_options(populate_existing=True)
     order = db.scalar(stmt)
     if order is None:
         raise NotFound("Order not found.")
@@ -62,7 +62,7 @@ def live_items(order: Order) -> list[OrderItem]:
 
 def _next_number(db: Session, location_id: int, field: str) -> int:
     location = db.scalar(select(Location).where(Location.id == location_id)
-                         .with_for_update().execution_options(populate_existing=True))
+                         .with_for_update(key_share=True).execution_options(populate_existing=True))
     assert location is not None
     value: int = getattr(location, field)
     setattr(location, field, value + 1)
@@ -194,6 +194,8 @@ def _add_items(db: Session, actor: Actor, order: Order, items: list[OrderItemIn]
     for line in items:
         key = (line.menu_item_id, line.notes or "")
         existing = pending.get(key)
+        if existing is not None and existing.unit_price != menu[line.menu_item_id].price:
+            existing = None  # price changed since that line was added: keep them separate
         if existing is not None:
             if existing.quantity + line.quantity > 999:
                 raise ValidationFailed("That's more than 999 of one item.")
@@ -254,6 +256,10 @@ def update_item(db: Session, actor: Actor, order_id: int, item_id: int,
     item = _get_item(order, item_id)
     if item.status != OrderItemStatus.PENDING:
         raise InvalidTransition("This item was already sent to the kitchen. Void it instead.")
+    if data.quantity is not None and data.quantity > item.quantity:
+        menu_item = db.get(MenuItem, item.menu_item_id)
+        if menu_item is None or not menu_item.is_active or not menu_item.is_available:
+            raise ValidationFailed(f"{item.name} is sold out. You can reduce it, not add more.")
     if data.quantity is not None:
         item.quantity = data.quantity
     if "notes" in data.model_fields_set:
@@ -287,7 +293,7 @@ def void_item(db: Session, actor: Actor, order_id: int, item_id: int, reason: st
     item.voided_at = now()
     item.void_reason = reason
     if item.ticket_id is not None:
-        _cancel_ticket_if_empty(db, item.ticket_id)
+        _settle_ticket(db, item.ticket_id)
     bump(order)
     audit.record(db, actor, "order.item_voided", "order", order.id,
                  f"Voided {item.quantity}× {item.name} on #{order.order_number}",
@@ -305,7 +311,7 @@ def mark_served(db: Session, actor: Actor, order_id: int, item_id: int) -> Order
     item.status = OrderItemStatus.SERVED
     if item.ticket_id is not None:
         ticket = db.scalar(select(KitchenTicket).where(KitchenTicket.id == item.ticket_id)
-                           .with_for_update(of=KitchenTicket)
+                           .with_for_update(of=KitchenTicket, key_share=True)
                            .execution_options(populate_existing=True))
         assert ticket is not None
         db.refresh(ticket, attribute_names=["items"])
@@ -315,22 +321,30 @@ def mark_served(db: Session, actor: Actor, order_id: int, item_id: int) -> Order
             ticket.status = TicketStatus.COMPLETED
             ticket.completed_at = now()
             bump(ticket)
-    bump(order)
+    # Item progress is not an order-level edit: bumping the order version here would make
+    # every concurrent bill/fire from another device fail as stale for no reason.
     return order
 
 
-def _cancel_ticket_if_empty(db: Session, ticket_id: int) -> None:
+def _settle_ticket(db: Session, ticket_id: int) -> None:
+    """Close a ticket that has nothing left for the kitchen to do: CANCELLED when every item
+    was voided, COMPLETED when the rest were already served."""
     ticket = db.scalar(select(KitchenTicket).where(KitchenTicket.id == ticket_id)
-                       .with_for_update(of=KitchenTicket)
+                       .with_for_update(of=KitchenTicket, key_share=True)
                        .execution_options(populate_existing=True))
     assert ticket is not None
     db.flush()
     db.refresh(ticket, attribute_names=["items"])
     if ticket.status in (TicketStatus.COMPLETED, TicketStatus.CANCELLED):
         return
-    if all(i.status == OrderItemStatus.VOIDED for i in ticket.items):
+    live = [i for i in ticket.items if i.status != OrderItemStatus.VOIDED]
+    if not live:
         ticket.status = TicketStatus.CANCELLED
         ticket.cancelled_at = now()
+        bump(ticket)
+    elif all(i.status == OrderItemStatus.SERVED for i in live):
+        ticket.status = TicketStatus.COMPLETED
+        ticket.completed_at = now()
         bump(ticket)
 
 
@@ -397,7 +411,7 @@ def cancel(db: Session, actor: Actor, order_id: int, data: CancelOrderIn) -> Ord
             item.void_reason = f"Order cancelled: {data.reason}"
     db.flush()
     for ticket_id in ticket_ids:
-        _cancel_ticket_if_empty(db, ticket_id)
+        _settle_ticket(db, ticket_id)
     order.status = OrderStatus.CANCELLED
     order.cancelled_at = now()
     order.cancel_reason = data.reason
@@ -482,12 +496,13 @@ def split(db: Session, actor: Actor, order_id: int, data: SplitIn) -> Order:
         raise ValidationFailed("Some items aren't on this order.")
     if any(i.status == OrderItemStatus.VOIDED for i in items):
         raise ValidationFailed("Voided items can't be moved.")
-    in_flight = (OrderItemStatus.SENT, OrderItemStatus.PREPARING, OrderItemStatus.READY)
-    if any(i.status in in_flight for i in items):
-        # Their kitchen ticket belongs to this order; moving them would split a ticket
-        # across two tables. Serve them first (or move the whole order).
-        raise InvalidTransition("Some of those items are still with the kitchen. "
-                                "Split them once they're served.")
+    # A ticket belongs to one order. Items whose ticket is still open in the kitchen (even
+    # if this particular item was served) must stay, or the ticket would span two tables.
+    open_tickets = {i.ticket_id for i in items if i.ticket_id is not None and i.ticket is not None
+                    and i.ticket.status not in (TicketStatus.COMPLETED, TicketStatus.CANCELLED)}
+    if open_tickets:
+        raise InvalidTransition("Some of those items are on a kitchen ticket that isn't finished. "
+                                "Split them once the kitchen completes it.")
     if len(items) == len(live_items(order)) and all(i.id in wanted for i in live_items(order)):
         raise ValidationFailed("That's every item. Move the whole order instead.")
     target_table = floor.get_table(db, actor, data.table_id, lock=True)
