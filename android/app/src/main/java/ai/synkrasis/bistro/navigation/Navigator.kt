@@ -18,8 +18,7 @@ class Navigator(private val nav: NavHostController) {
      * bill) always push, so moving from one order to another keeps the first on the stack.
      */
     fun open(route: Any) {
-        val singleTop = route::class.objectInstance != null
-        nav.navigate(route) { launchSingleTop = singleTop }
+        nav.navigate(route) { launchSingleTop = isSingleTop(route) }
     }
 
     /** Go to an order: pop back to it if it's the screen underneath, otherwise push it. */
@@ -42,6 +41,13 @@ class Navigator(private val nav: NavHostController) {
     /** Switch bottom-bar tab (restores that tab's state), used by shortcuts like Home tiles. */
     var selectTab: (TopLevel) -> Unit = { open(it.route) }
 }
+
+/**
+ * Argument-less routes are single-top; routes with arguments always push. Decided without
+ * reflection: kotlin-reflect isn't shipped, and reflective KClass lookups throw without it.
+ */
+fun isSingleTop(route: Any): Boolean =
+    route !is OrderRoute && route !is BillRoute && route !is AddItemsRoute && route !is RoleEditRoute
 
 /** The signed-in user, available to every screen for permission checks and formatting. */
 @Stable

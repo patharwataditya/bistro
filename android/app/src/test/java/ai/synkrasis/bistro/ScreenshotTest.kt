@@ -123,8 +123,9 @@ class ScreenshotTest(private val appearance: Appearance) {
                 table(1, "T1", TableStatus.Available),
                 table(2, "T12", TableStatus.Occupied, order(12, pending = 2, ready = 1)),
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
-                tables.forEach { TableCard(it, NOW, {}, {}, Modifier.weight(1f)) }
+            // At 1.5× text the grid's minimum column width (144dp × 1.5) gives one column here.
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                tables.forEach { TableCard(it, NOW, {}, {}, Modifier.fillMaxWidth()) }
             }
         }
         org.robolectric.RuntimeEnvironment.setFontScale(1f)

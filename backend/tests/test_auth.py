@@ -212,3 +212,37 @@ def test_refresh_reuse_after_grace_window_revokes(client, db):
 
 def test_health_supports_head(client):
     assert client.head("/api/v1/health").status_code == 200
+
+
+def test_grace_retry_discards_unreceived_successor(client):
+    first = ok(login(client))
+    lost = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    retry = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    # Only one chain survives: the successor the client never received is gone.
+    err(client.post("/api/v1/auth/refresh", json={"refresh_token": lost["refresh_token"]}), 401,
+        "UNAUTHENTICATED")
+    ok(client.post("/api/v1/auth/refresh", json={"refresh_token": retry["refresh_token"]}))
+
+
+def test_grace_window_still_detects_theft(client):
+    first = ok(login(client))
+    second = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    ok(client.post("/api/v1/auth/refresh", json={"refresh_token": second["refresh_token"]}))
+    # The old token comes back after its successor was already used: someone else has it.
+    err(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}), 401,
+        "UNAUTHENTICATED")
+
+
+def test_revoke_by_refresh_token(client):
+    tokens = ok(login(client))
+    ok(client.post("/api/v1/auth/revoke", json={"refresh_token": tokens["refresh_token"]}), 204)
+    err(client.get("/api/v1/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}), 401,
+        "UNAUTHENTICATED")
+    ok(client.post("/api/v1/auth/revoke", json={"refresh_token": "x" * 40}), 204)
+
+
+def test_successful_login_clears_address_counter(client, db):
+    from app.models import LoginThrottle
+    login(client, "ghost-a", "wrong-pass-1")
+    ok(login(client))
+    assert db.get(LoginThrottle, "login-ip:testclient") is None

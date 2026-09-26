@@ -117,7 +117,8 @@ fun StatusChip(
         } else {
             Box(Modifier.size(6.dp).clip(CircleShape).background(fg))
         }
-        Text(label.uppercase(), style = BistroTheme.type.statusLabel, color = fg, maxLines = 1)
+        Text(label.uppercase(), style = BistroTheme.type.statusLabel, color = fg, maxLines = 1,
+            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
     }
 }
 

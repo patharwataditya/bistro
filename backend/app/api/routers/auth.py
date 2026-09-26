@@ -31,6 +31,12 @@ def logout(actor: CurrentActor, db: DB) -> None:
     auth.logout(db, actor.id, actor.session_id)
 
 
+@router.post("/auth/revoke", status_code=status.HTTP_204_NO_CONTENT)
+def revoke(body: RefreshIn, db: DB) -> None:
+    """End the session that owns this refresh token. Always 204 (reveals nothing)."""
+    auth.revoke_by_refresh_token(db, body.refresh_token)
+
+
 @router.get("/me", response_model=MeOut)
 def me(actor: CurrentActor, db: DB) -> MeOut:
     restaurant = db.get(Restaurant, actor.restaurant_id)

@@ -14,6 +14,7 @@ DIR=/var/backups/bistro
 mkdir -p "$DIR"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 PART="$DIR/bistro-$STAMP.sql.gz.part"
+trap 'rm -f "$PART"' ERR
 cd "$(dirname "$0")"
 docker compose --env-file .env.prod -f docker-compose.prod.yml exec -T db \
   pg_dump -U bistro --format=plain --no-owner bistro | gzip -9 > "$PART"

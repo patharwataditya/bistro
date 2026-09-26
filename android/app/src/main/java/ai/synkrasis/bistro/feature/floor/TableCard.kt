@@ -126,15 +126,18 @@ fun TableCard(
                             Text("#${order.orderNumber}", style = BistroTheme.type.identifier, color = c.textSecondary)
                             Text(" · ${order.guestCount} guests", style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 1)
                         }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                             Icon(Icons.Rounded.Schedule, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
-                            Text(" ${Format.elapsed(order.openedAt, now)}", style = BistroTheme.type.metadata, color = c.textTertiary)
-                            Spacer(Modifier.weight(1f))
+                            Text(Format.elapsed(order.openedAt, now), style = BistroTheme.type.metadata, color = c.textTertiary,
+                                modifier = Modifier.weight(1f), maxLines = 1)
                             Text(Format.money(order.subtotal, session.currency), style = BistroTheme.type.amountSmall, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Clip)
                         }
                         if (order.readyCount > 0 || order.pendingCount > 0) {
                             Spacer(Modifier.height(Spacing.xs))
-                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            androidx.compose.foundation.layout.FlowRow(
+                                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
+                                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                            ) {
                                 if (order.readyCount > 0) MiniFlag("${order.readyCount} ready", Tone.Success)
                                 if (order.pendingCount > 0) MiniFlag("${order.pendingCount} unsent", Tone.Warning)
                             }
@@ -165,7 +168,7 @@ private val CARD_HEIGHT = 172.dp
 private fun MiniFlag(text: String, tone: Tone) {
     val colors = tone.colors()
     Text(
-        text, style = BistroTheme.type.statusLabel, color = colors.content,
+        text, style = BistroTheme.type.statusLabel, color = colors.content, maxLines = 1, softWrap = false,
         modifier = Modifier.clip(Radii.xs).background(colors.container).padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import case, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -50,11 +50,16 @@ def _register_failure(db: Session, key: str, limit: int | None = None) -> None:
     count survives the error response that follows."""
     settings = get_settings()
     max_failures = limit or settings.login_max_failures
+    # Sliding window: failures older than the lockout period no longer count, so ordinary
+    # typos spread over a shift never add up to a lockout on a shared restaurant network.
+    window = text(f"interval '{int(settings.login_lockout_seconds)} seconds'")
     failures = db.scalar(
         insert(LoginThrottle).values(key=key, failures=1, updated_at=func.now())
-        .on_conflict_do_update(index_elements=[LoginThrottle.key],
-                               set_={"failures": LoginThrottle.failures + 1,
-                                     "updated_at": func.now()})
+        .on_conflict_do_update(
+            index_elements=[LoginThrottle.key],
+            set_={"failures": case((LoginThrottle.updated_at < func.now() - window, 1),
+                                   else_=LoginThrottle.failures + 1),
+                  "updated_at": func.now()})
         .returning(LoginThrottle.failures)
     )
     if failures is not None and failures >= max_failures:
@@ -112,6 +117,7 @@ def login(db: Session, username: str, password: str, device_label: str | None,
         _register_failure(db, key)
         raise InvalidCredentials("Incorrect username or password.")
     _clear_throttle(db, key)
+    _clear_throttle(db, ip_key)
     if upgraded:
         user.password_hash = upgraded
     user.last_login_at = _now()
@@ -134,12 +140,23 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     if session is None or session.revoked_at is not None or session.expires_at <= now:
         raise Unauthenticated("Your session has ended. Sign in again.")
     if token.used_at is not None and now - token.used_at <= REFRESH_GRACE:
-        # The client retried a refresh whose response it never received (e.g. Wi-Fi dropped
-        # mid-response). Within a few seconds that is a lost response, not theft: issue a new
-        # successor instead of revoking a working device's session.
+        # The client may be retrying a refresh whose response it never received (Wi-Fi
+        # dropped mid-response). That is only plausible if the successor we issued has never
+        # been used; if it has, two parties hold this chain — treat it as theft.
+        successors = list(db.scalars(select(RefreshToken).where(
+            RefreshToken.session_id == session.id, RefreshToken.id > token.id)))
+        if any(s.used_at is not None for s in successors):
+            session.revoked_at = now
+            db.commit()
+            log.warning("refresh_token_reuse", user_id=session.user_id)
+            raise Unauthenticated("Your session has ended. Sign in again.")
         user = db.get(User, session.user_id)
         if user is None or not user.is_active:
             raise AccountInactive("This account has been deactivated.")
+        # Exactly one chain survives: the unreceived successor is discarded.
+        for s in successors:
+            db.delete(s)
+        token.used_at = now
         session.last_used_at = now
         return _issue(db, user, session)
     if token.used_at is not None:
@@ -163,6 +180,16 @@ def logout(db: Session, user_id: int, session_id: object) -> None:
     db.execute(update(AuthSession)
                .where(AuthSession.id == session_id, AuthSession.user_id == user_id)
                .values(revoked_at=_now()))
+
+
+def revoke_by_refresh_token(db: Session, refresh_token: str) -> None:
+    """Sign-out from a device that may no longer hold a valid access token: knowing the
+    refresh token proves ownership of the session."""
+    token = db.scalar(select(RefreshToken).where(
+        RefreshToken.token_hash == hash_refresh_token(refresh_token)))
+    if token is not None:
+        db.execute(update(AuthSession).where(AuthSession.id == token.session_id)
+                   .values(revoked_at=_now()))
 
 
 def revoke_all_sessions(db: Session, user: User) -> None:

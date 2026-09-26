@@ -62,6 +62,7 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
         val token = generation.current()
         val result = container.billing.get(billId)
         if (!generation.isCurrent(token)) return
+        generation.bump()
         state = state.reduce(result)
         dropObsoleteIntents()
         showSettledIfPaid()
@@ -145,7 +146,15 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
 
     private fun dropObsoleteIntents() {
         val version = bill?.version ?: return
-        if (payIntent?.version != null && payIntent?.version != version) payIntent = null
+        if (payIntent?.version != null && payIntent?.version != version) {
+            payIntent = null
+            if (sheet == BillSheet.Payment && settled == null && bill?.status == BillStatus.Open) {
+                // The earlier charge probably went through: never leave the old amount armed
+                // for a second tap.
+                sheet = null
+                effects.info("A payment was recorded. Check the balance before charging again.")
+            }
+        }
         if (refundIntent?.version != null && refundIntent?.version != version) refundIntent = null
     }
 

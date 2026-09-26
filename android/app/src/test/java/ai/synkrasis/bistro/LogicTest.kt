@@ -92,3 +92,22 @@ class LogicTest {
         assertTrue(quickTenders(BigDecimal.ZERO).isEmpty())
     }
 }
+
+class NavigationRulesTest {
+    @org.junit.Test fun singleTopWithoutReflection() {
+        org.junit.Assert.assertTrue(ai.synkrasis.bistro.navigation.isSingleTop(ai.synkrasis.bistro.navigation.FloorRoute))
+        org.junit.Assert.assertTrue(ai.synkrasis.bistro.navigation.isSingleTop(ai.synkrasis.bistro.navigation.StaffRoute))
+        org.junit.Assert.assertFalse(ai.synkrasis.bistro.navigation.isSingleTop(ai.synkrasis.bistro.navigation.OrderRoute(1)))
+        org.junit.Assert.assertFalse(ai.synkrasis.bistro.navigation.isSingleTop(ai.synkrasis.bistro.navigation.BillRoute(1)))
+    }
+
+    /** Guards against reintroducing reflection-only Kotlin APIs, which crash without kotlin-reflect. */
+    @org.junit.Test fun noReflectionOnlyApisInSources() {
+        var dir: java.io.File? = java.io.File(System.getProperty("user.dir")!!).absoluteFile
+        while (dir != null && !java.io.File(dir, "app/src/main/java").exists() && !java.io.File(dir, "src/main/java").exists()) dir = dir.parentFile
+        val root = listOf(java.io.File(dir, "src/main/java"), java.io.File(dir, "app/src/main/java")).first { it.exists() }
+        val offenders = root.walkTopDown().filter { it.extension == "kt" }
+            .filter { f -> f.readText().let { "objectInstance" in it || "kotlin.reflect.full" in it } }.toList()
+        org.junit.Assert.assertTrue("Reflection-only APIs in: $offenders", offenders.isEmpty())
+    }
+}

@@ -51,7 +51,10 @@ class FloorViewModel(private val container: AppContainer) : ViewModel() {
         val token = generation.current()
         val result = container.floor.floor()
         if (result is ApiResult.Success) clock.sync(result.value.serverTime)
-        if (generation.isCurrent(token)) state = state.reduce(result)
+        if (generation.isCurrent(token)) {
+            generation.bump()
+            state = state.reduce(result)
+        }
     }
 
     fun refreshNow() {

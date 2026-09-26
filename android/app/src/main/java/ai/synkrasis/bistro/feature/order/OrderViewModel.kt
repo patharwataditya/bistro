@@ -59,7 +59,10 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
     suspend fun refresh() {
         val token = generation.current()
         val result = container.orders.get(orderId)
-        if (generation.isCurrent(token)) state = state.reduce(result)
+        if (generation.isCurrent(token)) {
+            generation.bump()
+            state = state.reduce(result)
+        }
     }
 
     fun refreshNow() {
@@ -132,10 +135,36 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
         container.orders.updateItem(orderId, item.id, null, note.trim())
     }) { noteTarget = null }
 
+    /**
+     * Send any stepper changes still waiting on their debounce, right now. Returns the latest
+     * order (or a failure) so an action that follows uses the true quantities and version.
+     */
+    private suspend fun flushQuantities(): ApiResult<Order>? {
+        if (draftQuantities.isEmpty()) return null
+        quantityJobs.values.forEach { it.cancel() }
+        quantityJobs.clear()
+        var last: ApiResult<Order>? = null
+        for ((itemId, target) in draftQuantities) {
+            last = container.orders.updateItem(orderId, itemId, target, null)
+            if (last is ApiResult.Failure) break
+        }
+        draftQuantities = emptyMap()
+        (last as? ApiResult.Success)?.let {
+            generation.bump()
+            state = LoadState.Ready(it.value)
+        }
+        return last
+    }
+
     fun fire() {
-        val current = order ?: return
-        val key = keyFor(fireKey, current.version).also { fireKey = it }.second
-        run("fire", { container.orders.fire(orderId, current.version, key) }) {
+        run("fire", {
+            // The kitchen must get what the screen shows, including taps from the last 400 ms.
+            val flushed = flushQuantities()
+            if (flushed is ApiResult.Failure) return@run flushed
+            val current = order ?: return@run ApiResult.Failure(AppError.Unexpected())
+            val key = keyFor(fireKey, current.version).also { fireKey = it }.second
+            container.orders.fire(orderId, current.version, key)
+        }) {
             fireKey = null
             effects.success("Sent to the kitchen")
         }
@@ -163,6 +192,16 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
     fun updateGuests(guests: Int) {
         val current = order ?: return
         run("guests", { container.orders.update(orderId, current.version, guests, null) }) { editGuests = false }
+    }
+
+    /** Leaving the screen mid-debounce must not lose the edit: finish it on the app scope. */
+    override fun onCleared() {
+        val pending = draftQuantities
+        if (pending.isEmpty()) return
+        quantityJobs.values.forEach { it.cancel() }
+        container.appScope.launch {
+            pending.forEach { (itemId, target) -> container.orders.updateItem(orderId, itemId, target, null) }
+        }
     }
 
     fun cancel(reason: String) {

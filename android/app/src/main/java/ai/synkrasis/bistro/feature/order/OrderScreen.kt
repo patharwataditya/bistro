@@ -192,7 +192,7 @@ private fun OrderActionBar(order: Order, vm: OrderViewModel, modifier: Modifier)
     val c = BistroTheme.colors
     val navigator = LocalNavigator.current
     val haptics = LocalHaptics.current
-    val pending = order.items.filter { it.status == OrderItemStatus.Pending }.sumOf { it.quantity }
+    val pending = order.items.filter { it.status == OrderItemStatus.Pending }.sumOf { vm.draftQuantities[it.id] ?: it.quantity }
     val live = order.items.any { it.status != OrderItemStatus.Voided }
     val show = order.status != OrderStatus.Unknown
     AnimatedVisibility(

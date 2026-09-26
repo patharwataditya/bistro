@@ -187,8 +187,11 @@ private fun FloorContent(
         listOf(Triple("area-filtered", null, visible))
     }
 
+    // Two columns on a 360dp phone at normal text size; with large text the columns widen
+    // (possibly to one) rather than truncating table names and statuses.
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 1.6f)
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 144.dp),
+        columns = GridCells.Adaptive(minSize = 144.dp * fontScale),
         contentPadding = PaddingValues(start = Spacing.gutter, end = Spacing.gutter, bottom = Spacing.xxxl),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),

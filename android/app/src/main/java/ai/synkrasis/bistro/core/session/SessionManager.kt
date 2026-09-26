@@ -36,8 +36,8 @@ interface AuthGateway {
     suspend fun login(body: LoginIn): TokenPair
     suspend fun refresh(refreshToken: String): TokenPair
     suspend fun me(): Me
-    /** Revoke the session named by [accessToken] (used after local sign-out). */
-    suspend fun logoutWith(accessToken: String)
+    /** Revoke the server session that owns [refreshToken] (after local sign-out). */
+    suspend fun revoke(refreshToken: String)
 }
 
 /**
@@ -125,15 +125,20 @@ class SessionManager(
      * a slow network or a cancelled screen can never leave someone half signed out.
      */
     fun signOut() {
-        val token = accessToken
         scope.launch {
-            endLocally(null)
-            if (token != null) runCatching { gateway().logoutWith(token) }
+            // Under the refresh lock: an in-flight refresh can't write a token back afterwards
+            // (which would silently restore this user's session on the next launch).
+            val refreshToken = refreshLock.withLock {
+                val stored = tokens.read()
+                endLocally(null)
+                stored
+            }
+            if (refreshToken != null) runCatching { gateway().revoke(refreshToken) }
         }
     }
 
     fun onSessionEnded(notice: String) {
-        scope.launch { endLocally(notice) }
+        scope.launch { refreshLock.withLock { endLocally(notice) } }
     }
 
     private suspend fun endLocally(notice: String?) {

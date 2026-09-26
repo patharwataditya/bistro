@@ -43,6 +43,7 @@ class KitchenViewModel(private val container: AppContainer) : ViewModel() {
         val result = container.kitchen.board()
         if (result is ApiResult.Success) clock.sync(result.value.serverTime)
         if (!generation.isCurrent(token)) return
+        generation.bump()
         state = state.reduce(result.map { it.tickets })
     }
 
