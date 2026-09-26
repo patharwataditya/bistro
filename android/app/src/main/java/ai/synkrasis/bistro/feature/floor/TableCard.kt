@@ -22,20 +22,20 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Chair
 import androidx.compose.material.icons.rounded.Schedule
+import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,9 +66,13 @@ fun TableCard(
     val c = BistroTheme.colors
     val session = LocalSession.current
     val visual = table.status.visual
-    val tone = visual.tone.colors()
-    val stripe by animateColorAsState(tone.content, Motion.standard(), label = "stripe")
     val order = table.activeOrder
+    // The stripe matches the chip that is shown ("Bill issued" is informational, not occupied).
+    val billed = order?.status == OrderStatus.Billed
+    val tone = (if (billed) Tone.Info else visual.tone).colors()
+    // Scales with the user's font size, so large text never clips; rows still line up.
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale.coerceIn(1f, 1.8f)
+    val stripe by animateColorAsState(tone.content, Motion.standard(), label = "stripe")
     val description = buildString {
         append("Table ${table.name}, ${table.capacity} seats, ${visual.label}")
         table.statusNote?.let { append(", $it") }
@@ -81,7 +85,7 @@ fun TableCard(
     }
 
     BistroCard(
-        modifier = modifier.heightIn(min = 138.dp).clearAndSetSemantics {
+        modifier = modifier.height(CARD_HEIGHT * fontScale).clearAndSetSemantics {
             contentDescription = description
             onClick(label = if (order != null) "Open order" else "Seat guests") { onTap(); true }
             onLongClick(label = "Table actions") { onLongPress(); true }
@@ -90,55 +94,72 @@ fun TableCard(
         onLongClick = onLongPress,
         contentPadding = PaddingValues(0.dp),
     ) {
-        Row(Modifier.height(IntrinsicSize.Min)) {
-            Box(Modifier.width(4.dp).fillMaxHeight().heightIn(min = 138.dp).background(stripe))
-            Column(Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.md, bottom = Spacing.md).fillMaxWidth()) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(table.name, style = BistroTheme.type.tableLabel, color = c.textPrimary, modifier = Modifier.weight(1f), maxLines = 1)
-                    Icon(Icons.Rounded.Chair, null, tint = c.textTertiary, modifier = Modifier.size(14.dp))
-                    Text(" ${table.capacity}", style = BistroTheme.type.metadata, color = c.textTertiary)
-                }
-                Spacer(Modifier.height(Spacing.xs))
-                AnimatedContent(
-                    targetState = table.status to (order?.status == OrderStatus.Billed),
-                    transitionSpec = { fadeIn(Motion.standard()) togetherWith fadeOut(Motion.fast()) },
-                    label = "status",
-                ) { (status, billed) ->
-                    if (billed) {
-                        StatusChip("Bill issued", Tone.Info, icon = OrderStatus.Billed.visual.icon)
-                    } else {
-                        val v = status.visual
-                        StatusChip(v.label, v.tone, icon = v.icon)
-                    }
-                }
-                Spacer(Modifier.weight(1f, fill = false).height(Spacing.sm))
-                if (order != null) {
-                    Spacer(Modifier.height(Spacing.sm))
+        Row(Modifier.fillMaxHeight()) {
+            Box(Modifier.padding(vertical = Spacing.lg).width(4.dp).fillMaxHeight().clip(Radii.pill).background(stripe))
+            Column(
+                Modifier.padding(start = Spacing.md, end = Spacing.md, top = Spacing.md, bottom = Spacing.md).fillMaxSize(),
+                verticalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("#${order.orderNumber}", style = BistroTheme.type.identifier, color = c.textSecondary)
-                        Text(" · ${order.guestCount} guests", style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 1)
+                        Text(table.name, style = BistroTheme.type.tableLabel, color = c.textPrimary, modifier = Modifier.weight(1f), maxLines = 1)
+                        Icon(Icons.Rounded.Chair, null, tint = c.textTertiary, modifier = Modifier.size(14.dp))
+                        Text(" ${table.capacity}", style = BistroTheme.type.metadata, color = c.textTertiary)
                     }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Rounded.Schedule, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
-                        Text(" ${Format.elapsed(order.openedAt, now)}", style = BistroTheme.type.metadata, color = c.textTertiary)
-                        Spacer(Modifier.weight(1f))
-                        Text(Format.money(order.subtotal, session.currency), style = BistroTheme.type.amountSmall, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Clip)
-                    }
-                    if (order.readyCount > 0 || order.pendingCount > 0) {
-                        Spacer(Modifier.height(Spacing.xs))
-                        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
-                            if (order.readyCount > 0) MiniFlag("${order.readyCount} ready", Tone.Success)
-                            if (order.pendingCount > 0) MiniFlag("${order.pendingCount} unsent", Tone.Warning)
+                    Spacer(Modifier.height(Spacing.xs))
+                    AnimatedContent(
+                        targetState = table.status to (order?.status == OrderStatus.Billed),
+                        transitionSpec = { fadeIn(Motion.standard()) togetherWith fadeOut(Motion.fast()) },
+                        label = "status",
+                    ) { (status, billed) ->
+                        if (billed) {
+                            StatusChip("Bill issued", Tone.Info, icon = OrderStatus.Billed.visual.icon)
+                        } else {
+                            val v = status.visual
+                            StatusChip(v.label, v.tone, icon = v.icon)
                         }
                     }
-                } else if (table.statusNote != null) {
-                    Spacer(Modifier.height(Spacing.sm))
-                    Text(table.statusNote, style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+                if (order != null) {
+                    Column {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("#${order.orderNumber}", style = BistroTheme.type.identifier, color = c.textSecondary)
+                            Text(" · ${order.guestCount} guests", style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 1)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Rounded.Schedule, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
+                            Text(" ${Format.elapsed(order.openedAt, now)}", style = BistroTheme.type.metadata, color = c.textTertiary)
+                            Spacer(Modifier.weight(1f))
+                            Text(Format.money(order.subtotal, session.currency), style = BistroTheme.type.amountSmall, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Clip)
+                        }
+                        if (order.readyCount > 0 || order.pendingCount > 0) {
+                            Spacer(Modifier.height(Spacing.xs))
+                            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                                if (order.readyCount > 0) MiniFlag("${order.readyCount} ready", Tone.Success)
+                                if (order.pendingCount > 0) MiniFlag("${order.pendingCount} unsent", Tone.Warning)
+                            }
+                        }
+                    }
+                } else {
+                    Column {
+                        table.statusNote?.let {
+                            Text(it, style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (table.status.seatable) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Rounded.TouchApp, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
+                                Text(" Tap to seat", style = BistroTheme.type.metadata, color = c.textTertiary)
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
+
+/** Fixed so a row of the floor grid lines up, whatever each table is doing. */
+private val CARD_HEIGHT = 172.dp
 
 @Composable
 private fun MiniFlag(text: String, tone: Tone) {

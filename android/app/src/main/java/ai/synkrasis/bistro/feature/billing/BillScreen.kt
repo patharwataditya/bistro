@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun BillScreen(billId: Int) {
+    ai.synkrasis.bistro.core.ui.SecureScreen()
     val vm = bistroViewModel(key = "bill-$billId") { BillViewModel(it, billId) }
     val navigator = LocalNavigator.current
     val session = LocalSession.current
@@ -75,9 +76,14 @@ fun BillScreen(billId: Int) {
                 subtitle = bill?.let { "${it.serverName} · ${it.guestCount} guests" },
                 onBack = navigator::back,
                 actions = {
+                    // Voiding is rare and destructive: kept off the money bar, next to the title.
+                    if (bill != null && bill.canVoid && session.can(Permission.BILLING_VOID)) {
+                        BistroIconButton(Icons.Rounded.Block, "Void bill", { vm.open(BillSheet.Void) },
+                            enabled = vm.working == null, tint = BistroTheme.colors.danger)
+                    }
                     if (bill != null && session.can(Permission.ORDERS_VIEW)) {
                         BistroIconButton(Icons.AutoMirrored.Rounded.ReceiptLong, "Open check #${bill.orderNumber}", {
-                            navigator.open(OrderRoute(bill.orderId))
+                            navigator.openOrder(bill.orderId)
                         })
                     }
                 },
@@ -136,12 +142,11 @@ private fun BillActionBar(bill: Bill, vm: BillViewModel, modifier: Modifier) {
     val c = BistroTheme.colors
     val canPay = session.can(Permission.BILLING_PROCESS_PAYMENT)
     val showDiscount = bill.canDiscount && session.can(Permission.BILLING_DISCOUNT)
-    val showVoid = bill.canVoid && session.can(Permission.BILLING_VOID)
     val showRefund = bill.canRefund && session.can(Permission.BILLING_REFUND)
     val payPrimary = bill.canTakePayment && canPay
     val settlePrimary = bill.canSettleZero && canPay
     val refundPrimary = showRefund && bill.status != BillStatus.Open
-    val anything = payPrimary || settlePrimary || showDiscount || showVoid || showRefund
+    val anything = payPrimary || settlePrimary || showDiscount || showRefund
     AnimatedVisibility(
         visible = anything,
         enter = slideInVertically(Motion.enter()) { it } + fadeIn(),
@@ -156,7 +161,6 @@ private fun BillActionBar(bill: Bill, vm: BillViewModel, modifier: Modifier) {
             val secondary = buildList {
                 if (showDiscount) add(Triple(if (bill.discountType != null) "Edit discount" else "Discount", Icons.Rounded.LocalOffer, BillSheet.Discount))
                 if (showRefund && !refundPrimary) add(Triple("Refund", Icons.Rounded.Undo, BillSheet.Refund))
-                if (showVoid) add(Triple("Void bill", Icons.Rounded.Block, BillSheet.Void))
             }
             if (secondary.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {

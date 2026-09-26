@@ -65,7 +65,7 @@ class AppContainer(context: Context) {
                 override suspend fun login(body: LoginIn) = authApi.login(body)
                 override suspend fun refresh(refreshToken: String) = authApi.refresh(RefreshIn(refreshToken))
                 override suspend fun me() = api.me()
-                override suspend fun logout() = api.logout()
+                override suspend fun logoutWith(accessToken: String) = authApi.logout("Bearer $accessToken")
             }
         },
         json = json,

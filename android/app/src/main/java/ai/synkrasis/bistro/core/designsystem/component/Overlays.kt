@@ -40,13 +40,19 @@ fun BistroSheet(
     title: String,
     onDismiss: () -> Unit,
     subtitle: String? = null,
+    busy: Boolean = false,
     actions: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val c = BistroTheme.colors
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // While a request runs the sheet stays put: dismissing mid-charge would hide the result.
+        sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = true,
+            confirmValueChange = { it != androidx.compose.material3.SheetValue.Hidden || !busy },
+        ),
+        properties = androidx.compose.material3.ModalBottomSheetProperties(shouldDismissOnBackPress = !busy),
         shape = Radii.sheet,
         containerColor = c.surface,
         scrimColor = c.scrim,

@@ -19,8 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import ai.synkrasis.bistro.core.ui.Generation
 import java.math.BigDecimal
 
 /** The sheet or dialog open over the bill, if any. */
@@ -49,7 +48,7 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
         private set
 
     val effects = Effects()
-    private val lock = Mutex()
+    private val generation = Generation()
     private var payIntent: MoneyIntent? = null
     private var refundIntent: MoneyIntent? = null
 
@@ -59,9 +58,13 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
         loadMethods()
     }
 
-    suspend fun refresh() = lock.withLock {
-        state = state.markRefreshing()
-        state = state.reduce(container.billing.get(billId))
+    suspend fun refresh() {
+        val token = generation.current()
+        val result = container.billing.get(billId)
+        if (!generation.isCurrent(token)) return
+        state = state.reduce(result)
+        dropObsoleteIntents()
+        showSettledIfPaid()
     }
 
     fun refreshNow() {
@@ -107,7 +110,9 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
         viewModelScope.launch {
             when (val result = block()) {
                 is ApiResult.Success -> {
-                    lock.withLock { state = LoadState.Ready(result.value) }
+                    generation.bump()
+                    state = LoadState.Ready(result.value)
+                    dropObsoleteIntents()
                     onSuccess(result.value)
                 }
                 is ApiResult.Failure -> {
@@ -118,6 +123,30 @@ class BillViewModel(private val container: AppContainer, val billId: Int) : View
             }
             working = null
         }
+    }
+
+    /**
+     * A pending intent is only safe to replay while the bill is exactly as it was when the
+     * intent was made. Once the bill has moved on (for instance because the "lost" request
+     * actually landed), a new charge of the same amount is a *new* payment and must get a new
+     * key — replaying the old one would silently return the first payment instead.
+     */
+    /**
+     * If a payment's response was lost but a later refresh shows the bill paid, turn the open
+     * payment sheet into its settled state instead of leaving a form with nothing due.
+     */
+    private fun showSettledIfPaid() {
+        val current = bill ?: return
+        if (sheet == BillSheet.Payment && settled == null && current.status != BillStatus.Open) {
+            settled = current
+            payIntent = null
+        }
+    }
+
+    private fun dropObsoleteIntents() {
+        val version = bill?.version ?: return
+        if (payIntent?.version != null && payIntent?.version != version) payIntent = null
+        if (refundIntent?.version != null && refundIntent?.version != version) refundIntent = null
     }
 
     /**

@@ -108,6 +108,7 @@ class ReportsViewModel(private val container: AppContainer, private val zone: Zo
 
 @Composable
 fun ReportsScreen() {
+    ai.synkrasis.bistro.core.ui.SecureScreen()
     val session = LocalSession.current
     val vm = bistroViewModel { ReportsViewModel(it, session.zone) }
     val navigator = LocalNavigator.current

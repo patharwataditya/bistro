@@ -49,10 +49,10 @@ object Format {
         }
     }
 
-    /** "mm:ss" under an hour: the kitchen timer. */
+    /** Kitchen timer: "14m 05s", never "14:05" (which reads as a time of day). */
     fun clock(from: Instant, now: Instant): String {
         val s = Duration.between(from, now).coerceAtLeast(Duration.ZERO).seconds
-        return if (s < 3600) "%d:%02d".format(s / 60, s % 60) else "%dh %02dm".format(s / 3600, (s % 3600) / 60)
+        return if (s < 3600) "%dm %02ds".format(s / 60, s % 60) else "%dh %02dm".format(s / 3600, (s % 3600) / 60)
     }
 
     private val timeFormat = DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)
@@ -78,10 +78,13 @@ object Format {
 object MoneyInput {
     private val pattern = Regex("^\\d{0,10}(\\.\\d{0,2})?$")
 
-    fun accept(text: String): Boolean = text.isEmpty() || pattern.matches(text)
+    /** Keyboards in comma-decimal locales only offer ","; treat it as the decimal point. */
+    fun normalize(text: String): String = text.replace(',', '.')
+
+    fun accept(text: String): Boolean = text.isEmpty() || pattern.matches(normalize(text))
 
     fun parse(text: String): BigDecimal? =
-        text.takeIf { it.isNotBlank() && it != "." }?.toBigDecimalOrNull()?.setScale(2, RoundingMode.HALF_UP)
+        normalize(text).takeIf { it.isNotBlank() && it != "." }?.toBigDecimalOrNull()?.setScale(2, RoundingMode.HALF_UP)
 
     fun display(value: BigDecimal): String = value.setScale(2, RoundingMode.HALF_UP).toPlainString()
 }

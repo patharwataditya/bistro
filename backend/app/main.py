@@ -96,7 +96,7 @@ def create_app() -> FastAPI:
 
     api = APIRouter(prefix=API_PREFIX)
 
-    @api.get("/health", tags=["system"])
+    @api.api_route("/health", methods=["GET", "HEAD"], tags=["system"])
     def health() -> JSONResponse:
         try:
             with get_engine().connect() as conn:

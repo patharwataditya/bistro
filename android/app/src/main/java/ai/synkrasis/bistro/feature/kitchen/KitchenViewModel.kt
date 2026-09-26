@@ -17,8 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import ai.synkrasis.bistro.core.ui.Generation
 
 class KitchenViewModel(private val container: AppContainer) : ViewModel() {
     var state by mutableStateOf<LoadState<List<Ticket>>>(LoadState.Loading)
@@ -37,12 +36,13 @@ class KitchenViewModel(private val container: AppContainer) : ViewModel() {
 
     val clock = ServerClock()
     val effects = Effects()
-    private val lock = Mutex()
+    private val generation = Generation()
 
-    suspend fun refresh() = lock.withLock {
-        state = state.markRefreshing()
+    suspend fun refresh() {
+        val token = generation.current()
         val result = container.kitchen.board()
         if (result is ApiResult.Success) clock.sync(result.value.serverTime)
+        if (!generation.isCurrent(token)) return
         state = state.reduce(result.map { it.tickets })
     }
 
@@ -76,8 +76,9 @@ class KitchenViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
-    private suspend fun replace(updated: Ticket) = lock.withLock {
-        val ready = state as? LoadState.Ready ?: return@withLock
+    private fun replace(updated: Ticket) {
+        generation.bump()
+        val ready = state as? LoadState.Ready ?: return
         val list = ready.data
         state = ready.copy(
             data = if (list.any { it.id == updated.id }) {

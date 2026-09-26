@@ -19,8 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import ai.synkrasis.bistro.core.ui.Generation
 
 /** Area filter: everything, or one area (null id = tables without an area). */
 sealed interface AreaFilter {
@@ -37,19 +36,22 @@ class FloorViewModel(private val container: AppContainer) : ViewModel() {
     var area by mutableStateOf<AreaFilter>(AreaFilter.All)
     var statusFilter by mutableStateOf<TableStatus?>(null)
     var seatDraft by mutableStateOf<SeatDraft?>(null)
-    var actionsFor by mutableStateOf<DiningTable?>(null)
+    /** Table whose actions sheet is open; resolved against the latest floor on every read. */
+    var actionsForId by mutableStateOf<Int?>(null)
+    val actionsFor: DiningTable?
+        get() = actionsForId?.let { id -> (state as? LoadState.Ready)?.data?.tables?.firstOrNull { it.id == id } }
     var busy by mutableStateOf(false)
         private set
 
     val clock = ServerClock()
     val effects = Effects()
-    private val refreshLock = Mutex()
+    private val generation = Generation()
 
-    suspend fun refresh() = refreshLock.withLock {
-        state = state.markRefreshing()
+    suspend fun refresh() {
+        val token = generation.current()
         val result = container.floor.floor()
         if (result is ApiResult.Success) clock.sync(result.value.serverTime)
-        state = state.reduce(result)
+        if (generation.isCurrent(token)) state = state.reduce(result)
     }
 
     fun refreshNow() {
@@ -74,7 +76,7 @@ class FloorViewModel(private val container: AppContainer) : ViewModel() {
         when {
             order != null -> effects.navigate(OrderRoute(order.id))
             table.status.seatable && canSeat -> seatDraft = SeatDraft(table, table.capacity.coerceAtMost(2).coerceAtLeast(1))
-            else -> actionsFor = table
+            else -> actionsForId = table.id
         }
     }
 
@@ -106,7 +108,7 @@ class FloorViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             when (val result = container.floor.setStatus(table, status, note)) {
                 is ApiResult.Success -> {
-                    actionsFor = null
+                    actionsForId = null
                     effects.success("${table.name} marked ${status.name.lowercase()}")
                 }
                 is ApiResult.Failure -> effects.error(result.error.message)

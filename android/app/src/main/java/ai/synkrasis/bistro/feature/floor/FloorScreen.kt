@@ -120,7 +120,7 @@ fun FloorScreen() {
                     },
                     onLongPress = { table ->
                         haptics.perform(Haptic.LongPress)
-                        vm.actionsFor = table
+                        vm.actionsForId = table.id
                     },
                 )
             }
@@ -131,7 +131,7 @@ fun FloorScreen() {
         SeatGuestsSheet(
             draft = draft,
             busy = vm.busy,
-            onGuestsChange = { vm.seatDraft = draft.copy(guests = it) },
+            onGuestsChange = { vm.seatDraft = draft.copy(guests = it, key = ai.synkrasis.bistro.core.network.IdempotencyKeys.new()) },
             onConfirm = vm::openTable,
             onDismiss = { vm.seatDraft = null },
         )
@@ -144,14 +144,14 @@ fun FloorScreen() {
             busy = vm.busy,
             onSetStatus = { status, note -> vm.setStatus(table, status, note) },
             onSeat = {
-                vm.actionsFor = null
-                vm.seatDraft = SeatDraft(table, table.capacity.coerceAtMost(2))
+                vm.actionsForId = null
+                vm.seatDraft = SeatDraft(table, table.capacity.coerceAtMost(2).coerceAtLeast(1))
             },
             onOpenOrder = {
-                vm.actionsFor = null
+                vm.actionsForId = null
                 table.activeOrder?.let { vm.onTableTapped(table, false) }
             },
-            onDismiss = { vm.actionsFor = null },
+            onDismiss = { vm.actionsForId = null },
         )
     }
 }
@@ -177,17 +177,18 @@ private fun FloorContent(
             (vm.statusFilter == null || t.status == vm.statusFilter)
     }
     // Group by area in the "All" view so the grid reads like the room.
-    val groups: List<Pair<String?, List<DiningTable>>> = if (vm.area == AreaFilter.All) {
+    // (key, title, tables). Keys use the area id, never the name: names aren't unique keys.
+    val groups: List<Triple<String, String?, List<DiningTable>>> = if (vm.area == AreaFilter.All) {
         val order = floor.areas.associate { it.id to it.sortOrder }
         visible.groupBy { it.areaId }.toList()
             .sortedBy { (id, _) -> order[id] ?: Int.MAX_VALUE }
-            .map { (id, tables) -> (floor.areas.firstOrNull { it.id == id }?.name ?: "Unassigned") to tables }
+            .map { (id, tables) -> Triple("area-${id ?: "none"}", floor.areas.firstOrNull { it.id == id }?.name ?: "Unassigned", tables) }
     } else {
-        listOf(null to visible)
+        listOf(Triple("area-filtered", null, visible))
     }
 
     LazyVerticalGrid(
-        columns = GridCells.Adaptive(minSize = 158.dp),
+        columns = GridCells.Adaptive(minSize = 144.dp),
         contentPadding = PaddingValues(start = Spacing.gutter, end = Spacing.gutter, bottom = Spacing.xxxl),
         horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         verticalArrangement = Arrangement.spacedBy(Spacing.md),
@@ -215,9 +216,9 @@ private fun FloorContent(
                 )
             }
         }
-        groups.forEach { (title, tables) ->
+        groups.forEach { (key, title, tables) ->
             if (title != null && groups.size > 1) {
-                item(span = { GridItemSpan(maxLineSpan) }, key = "h-$title") {
+                item(span = { GridItemSpan(maxLineSpan) }, key = "h-$key") {
                     Text(
                         title.uppercase(), style = BistroTheme.type.statusLabel, color = BistroTheme.colors.textTertiary,
                         modifier = Modifier.padding(top = Spacing.sm).animateItem(),

@@ -83,6 +83,7 @@ fun PaymentSheet(bill: Bill, vm: BillViewModel) {
         title = if (settled != null) "Bill settled" else "Take payment",
         subtitle = if (settled != null) null else "Bill ${bill.billNumber} · Table ${bill.tableName}",
         onDismiss = { if (settled != null) vm.finish() else vm.dismissSheet() },
+        busy = vm.working != null,
         actions = if (settled != null) {
             { BistroButton("Done", vm::finish, Modifier.fillMaxWidth(), size = ButtonSize.Large) }
         } else {

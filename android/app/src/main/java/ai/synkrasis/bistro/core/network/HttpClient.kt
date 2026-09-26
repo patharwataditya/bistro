@@ -9,6 +9,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.Route
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
@@ -32,8 +33,15 @@ class TokenAuthenticator(private val session: () -> SessionManager) : Authentica
         if (response.request.url.encodedPath.contains("/auth/")) return null
         if (responseCount(response) >= 2) return null
         val failed = response.request.header("Authorization")?.removePrefix("Bearer ")
-        val fresh = runCatching { runBlocking { session().refreshAccessToken(failed) } }.getOrNull()
-            ?: return null
+        val fresh = try {
+            runBlocking { session().refreshAccessToken(failed) }
+        } catch (e: IOException) {
+            throw e
+        } catch (e: Exception) {
+            // Refresh couldn't reach the server: surface a network failure, NOT the 401, so
+            // a Wi-Fi blip after 15 minutes doesn't sign anyone out.
+            throw IOException("Couldn't renew the session", e)
+        } ?: return null // the server said the session is over
         return response.request.newBuilder().header("Authorization", "Bearer $fresh").build()
     }
 

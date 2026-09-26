@@ -103,7 +103,7 @@ fun MessageToast(message: UiMessage?, modifier: Modifier = Modifier) {
                 .shadow(if (c.isDark) 0.dp else 12.dp, Radii.lg, ambientColor = c.shadow, spotColor = c.shadow)
                 .clip(Radii.lg).background(c.ink).border(1.dp, c.borderStrong.copy(alpha = if (c.isDark) 1f else 0f), Radii.lg)
                 .padding(horizontal = Spacing.lg, vertical = Spacing.md)
-                .semantics { liveRegion = LiveRegionMode.Polite },
+                .semantics { liveRegion = if (m.kind == MessageKind.Error) LiveRegionMode.Assertive else LiveRegionMode.Polite },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(Spacing.md),
         ) {

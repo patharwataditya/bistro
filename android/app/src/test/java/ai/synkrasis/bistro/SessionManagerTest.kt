@@ -43,7 +43,7 @@ class SessionManagerTest {
         }
         override suspend fun me() = Me(1, "owner", "Olivia Owner", emptyList(), listOf("tables.view"),
             LocationBrief(1, "Main", "Asia/Kolkata", "INR"), "Bistro")
-        override suspend fun logout() = Unit
+        override suspend fun logoutWith(accessToken: String) = Unit
     }
 
     private fun unauthorized() = HttpException(Response.error<Any>(401,

@@ -60,6 +60,7 @@ fun SeatGuestsSheet(
         subtitle = "${table.capacity} seats${table.areaName?.let { " · $it" } ?: ""}" +
             (table.statusNote?.let { " · $it" } ?: ""),
         onDismiss = { if (!busy) onDismiss() },
+        busy = busy,
         actions = {
             BistroButton(
                 text = "Open table",

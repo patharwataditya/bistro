@@ -167,6 +167,7 @@ private fun OrderBody(order: Order, vm: OrderViewModel, staleError: ai.synkrasis
                         canServe = session.can(Permission.ORDERS_UPDATE) && item.status == OrderItemStatus.Ready,
                         canVoid = order.status == OrderStatus.Open && session.can(Permission.ORDERS_CANCEL) &&
                             item.status != OrderItemStatus.Pending && item.status != OrderItemStatus.Voided,
+                        quantity = vm.draftQuantities[item.id] ?: item.quantity,
                         onQuantity = { vm.setQuantity(item, it) },
                         onNote = { vm.noteTarget = item },
                         onServe = { vm.serve(item) },
@@ -226,7 +227,7 @@ private fun OrderActionBar(order: Order, vm: OrderViewModel, modifier: Modifier)
                             loading = vm.working == "fire",
                             modifier = Modifier.weight(1f),
                         )
-                        live && session.can(Permission.BILLING_CREATE) -> BistroButton(
+                        pending == 0 && live && session.can(Permission.BILLING_CREATE) -> BistroButton(
                             text = "Issue bill",
                             trailing = "· " + Format.money(order.totals.total, order.currencyCode),
                             onClick = {

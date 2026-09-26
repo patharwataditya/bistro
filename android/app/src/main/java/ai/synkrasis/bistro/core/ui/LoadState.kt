@@ -27,7 +27,23 @@ fun <T> LoadState<T>.reduce(result: ApiResult<T>): LoadState<T> = when (result) 
 }
 
 fun <T> LoadState<T>.markRefreshing(): LoadState<T> = when (this) {
-    is LoadState.Ready -> copy(refreshing = true)
+    // Background polls don't touch Ready state: no extra whole-screen recomposition per tick.
+    is LoadState.Ready -> this
     is LoadState.Failed -> LoadState.Loading
     LoadState.Loading -> this
+}
+
+/**
+ * Guards live screens against a slow poll landing *after* a user action and overwriting the
+ * newer result with older data. Actions call [bump] when they apply a server response; a poll
+ * reads [current] before fetching and applies its result only if nothing changed meanwhile.
+ * All access is on the main thread, so no lock is held across network I/O.
+ */
+class Generation {
+    private var value = 0L
+    fun current(): Long = value
+    fun bump() {
+        value++
+    }
+    fun isCurrent(token: Long): Boolean = token == value
 }

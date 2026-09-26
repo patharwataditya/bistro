@@ -67,6 +67,8 @@ def update_settings(db: Session, actor: Actor, data: SettingsUpdate) -> Settings
     # Explicit nulls mean "no change", never "clear a required setting".
     changes = data.model_dump(exclude_unset=True, exclude_none=True,
                               exclude={"version", "restaurant_name", "location_name"})
+    if "address" in changes:
+        changes["address"] = changes["address"] or None  # "" clears the address
     if "rounding_increment" in changes:
         changes["rounding_increment"] = Decimal(changes["rounding_increment"])
     before = {k: getattr(location, k) for k in changes}

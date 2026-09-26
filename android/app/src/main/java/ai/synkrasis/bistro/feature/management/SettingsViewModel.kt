@@ -115,10 +115,13 @@ class SettingsViewModel(private val container: AppContainer) : ActionViewModel()
     private val lock = Mutex()
 
     override suspend fun refresh() = lock.withLock {
-        state = state.markRefreshing()
         val result = container.settings.get()
+        // While someone is editing, keep the snapshot (and version) their edits started from:
+        // saving then diffs against what they saw and the server reports a conflict if another
+        // manager changed settings meanwhile, instead of silently reverting that change.
+        if (dirty && state is LoadState.Ready && result is ApiResult.Success) return@withLock
         state = state.reduce(result)
-        if (result is ApiResult.Success) adopt(result.value, keepEdits = true)
+        if (result is ApiResult.Success) adopt(result.value, keepEdits = false)
     }
 
     /** Take the server copy as the new baseline; unsaved edits survive background refreshes. */

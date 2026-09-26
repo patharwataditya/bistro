@@ -14,13 +14,15 @@ import ai.synkrasis.bistro.data.api.OrderItem
 import ai.synkrasis.bistro.navigation.BillRoute
 import ai.synkrasis.bistro.navigation.OrderRoute
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import ai.synkrasis.bistro.core.ui.Generation
 
 /** Which table-picking flow is open, if any. */
 enum class TablePick { Move, Merge, Split }
@@ -42,17 +44,22 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
         private set
 
     val effects = Effects()
-    private val lock = Mutex()
+    private val generation = Generation()
 
     // One key per intent, reused if the same action is retried after a lost response.
-    private var fireKey: String? = null
-    private var billKey: String? = null
+    // (version, key): a key is only reused for a retry against the same order version.
+    private var fireKey: Pair<Int, String>? = null
+    private var billKey: Pair<Int, String>? = null
+
+    private fun keyFor(current: Pair<Int, String>?, version: Int): Pair<Int, String> =
+        current?.takeIf { it.first == version } ?: (version to IdempotencyKeys.new())
 
     private val order: Order? get() = (state as? LoadState.Ready)?.data
 
-    suspend fun refresh() = lock.withLock {
-        state = state.markRefreshing()
-        state = state.reduce(container.orders.get(orderId))
+    suspend fun refresh() {
+        val token = generation.current()
+        val result = container.orders.get(orderId)
+        if (generation.isCurrent(token)) state = state.reduce(result)
     }
 
     fun refreshNow() {
@@ -66,21 +73,60 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
             when (val result = block()) {
                 is ApiResult.Success -> {
                     val value = result.value
-                    if (value is Order && value.id == orderId) lock.withLock { state = LoadState.Ready(value) }
+                    if (value is Order && value.id == orderId) {
+                        generation.bump()
+                        state = LoadState.Ready(value)
+                    }
                     onSuccess(value)
                 }
                 is ApiResult.Failure -> {
                     effects.error(result.error.message)
-                    if (result.error is AppError.Stale || result.error is AppError.InvalidState) refresh()
+                    if (result.error is AppError.Stale || result.error is AppError.InvalidState) {
+                        refresh()
+                        // The picker's snapshot (e.g. a merge source's version) is stale too.
+                        tablePick?.let { openPicker(it, keepSelection = true) }
+                    }
                 }
             }
             working = null
         }
     }
 
-    fun setQuantity(item: OrderItem, quantity: Int) = run("item-${item.id}", {
-        if (quantity <= 0) container.orders.removeItem(orderId, item.id) else container.orders.updateItem(orderId, item.id, quantity, null)
-    })
+    /** Quantities typed on the stepper but not yet confirmed by the server. */
+    var draftQuantities by mutableStateOf<Map<Int, Int>>(emptyMap())
+        private set
+    private val quantityJobs = mutableMapOf<Int, Job>()
+
+    /**
+     * Every tap counts: the stepper updates locally at once and the final value is sent once
+     * the taps stop (debounced), rather than dropping taps while a request is in flight.
+     */
+    fun setQuantity(item: OrderItem, quantity: Int) {
+        draftQuantities = draftQuantities + (item.id to quantity)
+        quantityJobs.remove(item.id)?.cancel()
+        quantityJobs[item.id] = viewModelScope.launch {
+            delay(400)
+            val target = draftQuantities[item.id] ?: return@launch
+            val result = container.orders.updateItem(orderId, item.id, target, null)
+            quantityJobs.remove(item.id)
+            if (draftQuantities[item.id] == target) draftQuantities = draftQuantities - item.id
+            when (result) {
+                is ApiResult.Success -> {
+                    generation.bump()
+                    state = LoadState.Ready(result.value)
+                }
+                is ApiResult.Failure -> {
+                    effects.error(result.error.message)
+                    refresh()
+                }
+            }
+        }
+    }
+
+    fun removeItem(item: OrderItem) = run("item-${item.id}", { container.orders.removeItem(orderId, item.id) }) {
+        noteTarget = null
+        effects.info("${item.name} removed")
+    }
 
     fun setNote(item: OrderItem, note: String) = run("item-${item.id}", {
         container.orders.updateItem(orderId, item.id, null, note.trim())
@@ -88,7 +134,7 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
 
     fun fire() {
         val current = order ?: return
-        val key = fireKey ?: IdempotencyKeys.new().also { fireKey = it }
+        val key = keyFor(fireKey, current.version).also { fireKey = it }.second
         run("fire", { container.orders.fire(orderId, current.version, key) }) {
             fireKey = null
             effects.success("Sent to the kitchen")
@@ -106,7 +152,7 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
 
     fun createBill() {
         val current = order ?: return
-        val key = billKey ?: IdempotencyKeys.new().also { billKey = it }
+        val key = keyFor(billKey, current.version).also { billKey = it }.second
         run("bill", { container.billing.create(key, orderId, current.version) }) { bill ->
             billKey = null
             refresh()
@@ -128,9 +174,14 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
         }
     }
 
-    fun openPicker(kind: TablePick) {
+    var splitGuests by mutableIntStateOf(1)
+
+    fun openPicker(kind: TablePick, keepSelection: Boolean = false) {
         tablePick = kind
-        if (kind == TablePick.Split) splitSelection = emptySet()
+        if (kind == TablePick.Split && !keepSelection) {
+            splitSelection = emptySet()
+            splitGuests = 1
+        }
         pickerTables = LoadState.Loading
         viewModelScope.launch {
             pickerTables = when (val r = container.floor.floor()) {
@@ -140,7 +191,15 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
         }
     }
 
+    /** Move and merge need a confirmation: a merge can't be undone. */
+    var confirmPick by mutableStateOf<DiningTable?>(null)
+
     fun pickTable(table: DiningTable) {
+        if (tablePick != TablePick.Split && confirmPick?.id != table.id) {
+            confirmPick = table
+            return
+        }
+        confirmPick = null
         val current = order ?: return
         when (tablePick) {
             TablePick.Move -> run("move", { container.orders.transfer(orderId, current.version, table.id) }) {
@@ -155,7 +214,7 @@ class OrderViewModel(private val container: AppContainer, val orderId: Int) : Vi
                 }
             }
             TablePick.Split -> run("split", {
-                container.orders.split(orderId, current.version, table.id, splitSelection.toList(), 1)
+                container.orders.split(orderId, current.version, table.id, splitSelection.toList(), splitGuests)
             }) { newOrder ->
                 tablePick = null
                 refresh()

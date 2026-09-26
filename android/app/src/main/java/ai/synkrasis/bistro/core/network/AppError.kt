@@ -87,7 +87,7 @@ private fun fromHttp(e: HttpException, json: Json): AppError {
         "INVALID_TRANSITION" -> AppError.InvalidState(message)
         "CONFLICT", "IDEMPOTENCY_MISMATCH" -> AppError.Conflict(message)
         "VALIDATION_ERROR" -> AppError.Validation(message, fieldErrors(body.details))
-        "RATE_LIMITED" -> AppError.RateLimited(message)
+        "RATE_LIMITED", "ACCOUNT_LOCKED" -> AppError.RateLimited(message)
         "INTERNAL_ERROR" -> AppError.Server(message)
         else -> when (e.code()) {
             401 -> AppError.SessionEnded("Your session has ended. Sign in again.")

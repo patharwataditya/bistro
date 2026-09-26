@@ -35,6 +35,7 @@ fun SettingsScreen() {
     val navigator = LocalNavigator.current
     val session = LocalSession.current
     CollectEffects(vm.effects.flow, onNavigate = navigator::open, onBack = navigator::back)
+    val guardedBack = rememberGuardedBack(vm.dirty, navigator::back)
     PollWhileVisible(120_000) { vm.refresh() }
     val canEdit = session.can(Permission.SETTINGS_UPDATE)
 
@@ -44,7 +45,7 @@ fun SettingsScreen() {
                 title = "Settings",
                 eyebrow = session.me.restaurantName,
                 subtitle = session.me.location.name,
-                onBack = navigator::back,
+                onBack = guardedBack,
             )
             val s = vm.state
             val form = vm.general

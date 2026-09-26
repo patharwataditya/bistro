@@ -24,7 +24,8 @@ class Messenger {
 
     suspend fun autoDismiss() {
         val shown = current ?: return
-        delay(if (shown.text.length > 60) 4200 else 2800)
+        val base = if (shown.kind == ai.synkrasis.bistro.core.designsystem.component.MessageKind.Error) 6000L else 2800L
+        delay(if (shown.text.length > 60) base + 1400 else base)
         if (current?.id == shown.id) current = null
     }
 }

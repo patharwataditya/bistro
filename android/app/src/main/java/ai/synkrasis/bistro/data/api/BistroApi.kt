@@ -13,8 +13,6 @@ import retrofit2.http.Query
 /** The Bistro REST API (/api/v1). Every call is authorised server-side. */
 interface BistroApi {
     // auth
-    @POST("auth/login") suspend fun login(@Body body: LoginIn): TokenPair
-    @POST("auth/logout") suspend fun logout()
     @GET("me") suspend fun me(): Me
     @POST("me/password") suspend fun changePassword(@Body body: ChangePasswordIn): TokenPair
 

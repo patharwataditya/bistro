@@ -38,9 +38,13 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -73,21 +77,34 @@ fun KitchenScreen() {
     }
 
     val tickets = (vm.state as? LoadState.Ready)?.data
+    // "Recently served" is looked at rarely; it's a toggle instead of a permanent fourth lane,
+    // which keeps the three working lanes wide enough to read on phones and portrait tablets.
+    var showDone by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     Column(Modifier.fillMaxSize()) {
         BistroTopBar(
-            title = "Kitchen",
+            title = if (showDone) "Recently served" else "Kitchen",
             eyebrow = session.me.location.name,
             subtitle = tickets?.let { summary(it) },
+            actions = {
+                ai.synkrasis.bistro.core.designsystem.component.BistroIconButton(
+                    if (showDone) androidx.compose.material.icons.Icons.Rounded.Close else androidx.compose.material.icons.Icons.Rounded.History,
+                    if (showDone) "Back to the board" else "Show recently served",
+                    {
+                        showDone = !showDone
+                        vm.lane = if (showDone) Lane.Done else Lane.New
+                    },
+                )
+            },
         )
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val wide = maxWidth >= WIDE_BREAKPOINT
             when (val s = vm.state) {
                 LoadState.Loading -> KitchenSkeleton(wide)
                 is LoadState.Failed -> ErrorState(s.error, vm::refreshNow, Modifier.fillMaxSize())
-                is LoadState.Ready -> if (wide) {
+                is LoadState.Ready -> if (wide && !showDone) {
                     LaneColumns(s.data, s.staleError, now, vm, maxWidth)
                 } else {
-                    PhoneBoard(s.data, s.staleError, now, vm)
+                    PhoneBoard(s.data, s.staleError, now, vm, showDone)
                 }
             }
         }
@@ -102,10 +119,10 @@ private fun summary(tickets: List<Ticket>): String {
 }
 
 @Composable
-private fun PhoneBoard(tickets: List<Ticket>, staleError: AppError?, now: State<Instant>, vm: KitchenViewModel) {
+private fun PhoneBoard(tickets: List<Ticket>, staleError: AppError?, now: State<Instant>, vm: KitchenViewModel, showDone: Boolean) {
     Column(Modifier.fillMaxSize()) {
-        SegmentedControl(
-            options = Lane.entries,
+        if (!showDone) SegmentedControl(
+            options = Lane.entries.filter { it != Lane.Done },
             selected = vm.lane,
             onSelect = { vm.lane = it },
             label = { it.label },
@@ -125,7 +142,7 @@ private fun PhoneBoard(tickets: List<Ticket>, staleError: AppError?, now: State<
 
 @Composable
 private fun LaneColumns(tickets: List<Ticket>, staleError: AppError?, now: State<Instant>, vm: KitchenViewModel, width: Dp) {
-    val lanes = Lane.entries
+    val lanes = Lane.entries.filter { it != Lane.Done }
     val available = width - Spacing.gutter * 2 - Spacing.md * (lanes.size - 1)
     val laneWidth = maxOf(MIN_LANE_WIDTH, available / lanes.size)
     Column(Modifier.fillMaxSize()) {
@@ -199,7 +216,7 @@ private fun LaneList(
                 busy = ticket.id in vm.busy,
                 onAction = { action ->
                     haptics.perform(Haptic.Confirm)
-                    vm.transition(ticket, action.to) { haptics.perform(Haptic.Success) }
+                    vm.transition(ticket, action.to)
                 },
                 modifier = Modifier.animateItem(fadeInSpec = Motion.standard(), placementSpec = Motion.placement, fadeOutSpec = Motion.fast()),
             )

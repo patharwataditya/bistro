@@ -87,6 +87,10 @@ class LoginViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             try {
                 container.session.signIn(username, password, "${Build.MANUFACTURER} ${Build.MODEL}".take(120))
+                // This ViewModel outlives the session (it sits above navigation): never leave
+                // one person's credentials on the form for the next person at a shared device.
+                username = ""
+                password = ""
             } catch (t: Throwable) {
                 error = t.toAppError(container.json).let {
                     // A 401 here is "wrong credentials", not "your session ended".

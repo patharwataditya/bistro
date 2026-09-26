@@ -64,6 +64,7 @@ fun RoleEditScreen(roleId: Int) {
     val navigator = LocalNavigator.current
     val session = LocalSession.current
     CollectEffects(vm.effects.flow, onNavigate = navigator::open, onBack = navigator::back)
+    val guardedBack = rememberGuardedBack(vm.dirty, navigator::back)
     LaunchedEffect(vm) { vm.refresh() }
 
     val data = vm.state.dataOrNull
@@ -78,7 +79,7 @@ fun RoleEditScreen(roleId: Int) {
                 eyebrow = "Roles",
                 subtitle = role?.let { "${it.memberCount} ${if (it.memberCount == 1) "member" else "members"}" }
                     ?: if (vm.isNew) "Choose what this job can do" else null,
-                onBack = navigator::back,
+                onBack = guardedBack,
                 actions = {
                     if (canDelete) {
                         BistroIconButton(Icons.Rounded.DeleteOutline, "Delete role", { vm.confirmDelete = true }, tint = BistroTheme.colors.danger)

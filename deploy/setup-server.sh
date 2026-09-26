@@ -22,8 +22,10 @@ if ! command -v docker >/dev/null; then
 fi
 sudo systemctl enable --now docker
 
-# Unattended security updates.
+# Unattended security updates, rebooting at a quiet hour when a kernel update needs it.
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq unattended-upgrades >/dev/null
+printf 'Unattended-Upgrade::Automatic-Reboot "true";\nUnattended-Upgrade::Automatic-Reboot-Time "04:45";\n' \
+  | sudo tee /etc/apt/apt.conf.d/52bistro-reboot >/dev/null
 
 # Secrets are generated here, on the server, and never leave it.
 if [ ! -f .env.prod ]; then
@@ -35,7 +37,9 @@ if [ ! -f .env.prod ]; then
   } > .env.prod
 fi
 
-sudo docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+sudo docker compose --env-file .env.prod -f docker-compose.prod.yml pull --quiet db caddy
+sudo docker compose --env-file .env.prod -f docker-compose.prod.yml build --pull
+sudo docker compose --env-file .env.prod -f docker-compose.prod.yml up -d
 
 chmod +x backup.sh
 install_cron() {  # $1 = marker, $2 = line; replaces any previous line with the marker

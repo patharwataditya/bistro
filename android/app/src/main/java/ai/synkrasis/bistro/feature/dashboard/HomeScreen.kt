@@ -29,9 +29,7 @@ import ai.synkrasis.bistro.data.api.TableCounts
 import ai.synkrasis.bistro.domain.TableStatus
 import ai.synkrasis.bistro.domain.urgencyFor
 import ai.synkrasis.bistro.domain.visual
-import ai.synkrasis.bistro.navigation.BillsRoute
-import ai.synkrasis.bistro.navigation.FloorRoute
-import ai.synkrasis.bistro.navigation.KitchenRoute
+import ai.synkrasis.bistro.navigation.TopLevel
 import ai.synkrasis.bistro.navigation.LocalNavigator
 import ai.synkrasis.bistro.navigation.LocalSession
 import ai.synkrasis.bistro.navigation.ReportsRoute
@@ -106,7 +104,7 @@ fun HomeScreen() {
     }
     Column(Modifier.fillMaxSize()) {
         BistroTopBar(
-            title = "$greeting, ${session.me.fullName.substringBefore(' ')}",
+            title = "$greeting, ${session.me.fullName.substringBefore(' ')}".takeIf { it.length <= 24 } ?: greeting,
             eyebrow = session.me.restaurantName,
             subtitle = (vm.state as? LoadState.Ready)?.data?.let { Format.date(it.businessDate) + " · " + session.me.location.name },
         )
@@ -140,7 +138,7 @@ private fun HomeContent(d: Dashboard, stale: ai.synkrasis.bistro.core.network.Ap
             }
         }
         d.tables?.let { t ->
-            BistroCard(Modifier.fillMaxWidth(), onClick = { navigator.open(FloorRoute) }) {
+            BistroCard(Modifier.fillMaxWidth(), onClick = { navigator.selectTab(TopLevel.Floor) }) {
                 MetricHeader(Icons.Rounded.TableRestaurant, "Floor")
                 Row(verticalAlignment = Alignment.Bottom) {
                     AnimatedCounter("${t.available}", BistroTheme.type.metric, c.textPrimary)
@@ -158,7 +156,7 @@ private fun HomeContent(d: Dashboard, stale: ai.synkrasis.bistro.core.network.Ap
                     caption = "${k.new} new · ${k.preparing} cooking" + (oldestMinutes?.let { " · oldest ${it}m" } ?: ""),
                     tone = oldestMinutes?.let { urgencyFor(it).tone },
                     modifier = Modifier.weight(1f),
-                    onClick = if (session.can(Permission.KITCHEN_VIEW)) ({ navigator.open(KitchenRoute) }) else null,
+                    onClick = if (session.can(Permission.KITCHEN_VIEW)) ({ navigator.selectTab(TopLevel.Kitchen) }) else null,
                 )
             }
             d.openOrders?.let { open ->
@@ -167,7 +165,7 @@ private fun HomeContent(d: Dashboard, stale: ai.synkrasis.bistro.core.network.Ap
                     caption = if ((d.readyItems ?: 0) > 0) "${d.readyItems} items ready to serve" else "open checks",
                     tone = if ((d.readyItems ?: 0) > 0) Tone.Success else null,
                     modifier = Modifier.weight(1f),
-                    onClick = if (session.can(Permission.TABLES_VIEW)) ({ navigator.open(FloorRoute) }) else null,
+                    onClick = if (session.can(Permission.TABLES_VIEW)) ({ navigator.selectTab(TopLevel.Floor) }) else null,
                 )
             }
         }
@@ -177,7 +175,7 @@ private fun HomeContent(d: Dashboard, stale: ai.synkrasis.bistro.core.network.Ap
                 caption = d.openBillsAmount?.let { Format.money(it, d.currencyCode) + " outstanding" } ?: "",
                 tone = if (n > 0) Tone.Warning else null,
                 modifier = Modifier.fillMaxWidth(),
-                onClick = { navigator.open(BillsRoute) },
+                onClick = { navigator.selectTab(TopLevel.Bills) },
             )
         }
         d.recentActivity?.let { activity ->
@@ -191,9 +189,10 @@ private fun HomeContent(d: Dashboard, stale: ai.synkrasis.bistro.core.network.Ap
             })
             if (activity.isEmpty()) {
                 Text("Nothing yet today.", style = BistroTheme.type.supporting, color = c.textSecondary)
-            }
-            BistroCard(Modifier.fillMaxWidth(), elevated = false) {
-                activity.forEachIndexed { i, a -> ActivityRow(a, vm.clock.now(), session.zone, last = i == activity.lastIndex) }
+            } else {
+                BistroCard(Modifier.fillMaxWidth(), elevated = false) {
+                    activity.forEachIndexed { i, a -> ActivityRow(a, vm.clock.now(), session.zone, last = i == activity.lastIndex) }
+                }
             }
         }
         if (d.tables == null && d.kitchen == null && d.salesToday == null && d.openBills == null) {
@@ -245,7 +244,10 @@ private fun FloorBar(t: TableCounts) {
             }
         }
         Gap(Spacing.sm)
-        Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+        androidx.compose.foundation.layout.FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(Spacing.md),
+            verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+        ) {
             parts.forEach { (status, count) ->
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(8.dp).clip(Radii.pill).background(status.visual.tone.colors().content))

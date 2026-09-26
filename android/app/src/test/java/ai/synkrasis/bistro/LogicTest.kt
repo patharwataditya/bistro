@@ -51,7 +51,7 @@ class LogicTest {
         assertEquals("12m", Format.elapsed(t0, t0.plusSeconds(12 * 60)))
         assertEquals("1h 5m", Format.elapsed(t0, t0.plusSeconds(65 * 60)))
         assertEquals("now", Format.elapsed(t0, t0.minusSeconds(90)))
-        assertEquals("3:07", Format.clock(t0, t0.plusSeconds(187)))
+        assertEquals("3m 07s", Format.clock(t0, t0.plusSeconds(187)))
     }
 
     @Test fun signedMoneyUsesTrueMinus() {

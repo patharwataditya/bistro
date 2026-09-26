@@ -24,6 +24,7 @@ from app.models import AuthSession, LoginThrottle, RefreshToken, User
 from app.schemas.auth import TokenPair
 
 log = get_logger(__name__)
+REFRESH_GRACE = timedelta(seconds=10)
 
 
 def _now() -> datetime:
@@ -31,6 +32,9 @@ def _now() -> datetime:
 
 
 # ---------- throttling ----------
+
+IP_MAX_FAILURES = 30  # across all usernames from one address: stops password spraying
+
 
 def _check_throttle(db: Session, key: str) -> None:
     row = db.get(LoginThrottle, key)
@@ -41,10 +45,11 @@ def _check_throttle(db: Session, key: str) -> None:
                                    int((row.locked_until - _now()).total_seconds()) + 1})
 
 
-def _register_failure(db: Session, key: str) -> None:
+def _register_failure(db: Session, key: str, limit: int | None = None) -> None:
     """Atomic increment; locks the key once it reaches the limit. Commits immediately so the
     count survives the error response that follows."""
     settings = get_settings()
+    max_failures = limit or settings.login_max_failures
     failures = db.scalar(
         insert(LoginThrottle).values(key=key, failures=1, updated_at=func.now())
         .on_conflict_do_update(index_elements=[LoginThrottle.key],
@@ -52,7 +57,7 @@ def _register_failure(db: Session, key: str) -> None:
                                      "updated_at": func.now()})
         .returning(LoginThrottle.failures)
     )
-    if failures is not None and failures >= settings.login_max_failures:
+    if failures is not None and failures >= max_failures:
         db.execute(update(LoginThrottle).where(LoginThrottle.key == key).values(
             failures=0, locked_until=_now() + timedelta(seconds=settings.login_lockout_seconds)))
         log.warning("throttle_locked", key_kind=key.split(":", 1)[0])
@@ -96,11 +101,14 @@ def start_session(db: Session, user: User, device_label: str | None) -> TokenPai
 def login(db: Session, username: str, password: str, device_label: str | None,
           client_ip: str) -> TokenPair:
     key = f"login:{username.lower()}:{client_ip}"
+    ip_key = f"login-ip:{client_ip}"
+    _check_throttle(db, ip_key)
     _check_throttle(db, key)
     user = db.scalar(select(User).where(func.lower(User.username) == username.lower()))
     valid, upgraded = verify_password(password, user.password_hash if user else None)
     # A deactivated account answers exactly like a wrong password: no oracle for either.
     if user is None or not valid or not user.is_active:
+        _register_failure(db, ip_key, IP_MAX_FAILURES)
         _register_failure(db, key)
         raise InvalidCredentials("Incorrect username or password.")
     _clear_throttle(db, key)
@@ -125,6 +133,15 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     now = _now()
     if session is None or session.revoked_at is not None or session.expires_at <= now:
         raise Unauthenticated("Your session has ended. Sign in again.")
+    if token.used_at is not None and now - token.used_at <= REFRESH_GRACE:
+        # The client retried a refresh whose response it never received (e.g. Wi-Fi dropped
+        # mid-response). Within a few seconds that is a lost response, not theft: issue a new
+        # successor instead of revoking a working device's session.
+        user = db.get(User, session.user_id)
+        if user is None or not user.is_active:
+            raise AccountInactive("This account has been deactivated.")
+        session.last_used_at = now
+        return _issue(db, user, session)
     if token.used_at is not None:
         # A rotated token came back: it was stolen or replayed. Kill the whole session.
         session.revoked_at = now

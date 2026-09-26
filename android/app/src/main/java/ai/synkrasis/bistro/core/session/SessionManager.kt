@@ -10,7 +10,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
@@ -34,7 +36,8 @@ interface AuthGateway {
     suspend fun login(body: LoginIn): TokenPair
     suspend fun refresh(refreshToken: String): TokenPair
     suspend fun me(): Me
-    suspend fun logout()
+    /** Revoke the session named by [accessToken] (used after local sign-out). */
+    suspend fun logoutWith(accessToken: String)
 }
 
 /**
@@ -117,9 +120,16 @@ class SessionManager(
         }
     }
 
-    suspend fun signOut() {
-        runCatching { gateway().logout() }
-        endLocally(null)
+    /**
+     * End the session on this device immediately, then tell the server in the background:
+     * a slow network or a cancelled screen can never leave someone half signed out.
+     */
+    fun signOut() {
+        val token = accessToken
+        scope.launch {
+            endLocally(null)
+            if (token != null) runCatching { gateway().logoutWith(token) }
+        }
     }
 
     fun onSessionEnded(notice: String) {
@@ -128,7 +138,7 @@ class SessionManager(
 
     private suspend fun endLocally(notice: String?) {
         accessToken = null
-        tokens.clear()
+        withContext(NonCancellable) { tokens.clear() }
         if (_state.value !is SessionState.SignedOut) _state.value = SessionState.SignedOut(notice)
     }
 }

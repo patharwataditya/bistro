@@ -113,6 +113,23 @@ class ScreenshotTest(private val appearance: Appearance) {
         }
     }
 
+    /** 360dp phone at 1.5× font size: the floor grid must stay two columns and not clip. */
+    @Test
+    @Config(qualifiers = "w360dp-h780dp-xxhdpi")
+    fun floorCardsSmallPhoneLargeFont() {
+        org.robolectric.RuntimeEnvironment.setFontScale(1.5f)
+        shot("floor_cards_360dp_font150") {
+            val tables = listOf(
+                table(1, "T1", TableStatus.Available),
+                table(2, "T12", TableStatus.Occupied, order(12, pending = 2, ready = 1)),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(Spacing.md)) {
+                tables.forEach { TableCard(it, NOW, {}, {}, Modifier.weight(1f)) }
+            }
+        }
+        org.robolectric.RuntimeEnvironment.setFontScale(1f)
+    }
+
     @Test fun kitchenTicket() = shot("kitchen_ticket") {
         val ticket = Ticket(
             id = 3, ticketNumber = 9, status = TicketStatus.Preparing, orderId = 7, orderNumber = 12,

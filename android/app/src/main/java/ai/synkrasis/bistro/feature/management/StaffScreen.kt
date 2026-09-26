@@ -60,6 +60,7 @@ import java.time.Instant
 
 @Composable
 fun StaffScreen() {
+    ai.synkrasis.bistro.core.ui.SecureScreen()
     val session = LocalSession.current
     val vm = bistroViewModel(key = "staff") { StaffViewModel(it, session.can(Permission.ROLES_VIEW)) }
     val navigator = LocalNavigator.current

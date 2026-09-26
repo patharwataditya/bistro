@@ -371,3 +371,27 @@ fun DetailLine(label: String, value: String, modifier: Modifier = Modifier) {
         )
     }
 }
+
+/**
+ * Back that respects unsaved edits: system back and the top-bar arrow both ask before
+ * discarding. Returns the back action to wire into the top bar.
+ */
+@Composable
+fun rememberGuardedBack(dirty: Boolean, onBack: () -> Unit): () -> Unit {
+    var asking by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = dirty) { asking = true }
+    if (asking) {
+        ai.synkrasis.bistro.core.designsystem.component.ConfirmDialog(
+            title = "Discard changes?",
+            message = "Your edits haven't been saved.",
+            confirmLabel = "Discard",
+            destructive = true,
+            onConfirm = {
+                asking = false
+                onBack()
+            },
+            onDismiss = { asking = false },
+        )
+    }
+    return { if (dirty) asking = true else onBack() }
+}

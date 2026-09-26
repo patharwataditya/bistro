@@ -1,6 +1,8 @@
 {
+	# Nothing sits in front of Caddy, so no upstream proxy is trusted (no trusted_proxies):
+	# a client's own X-Forwarded-For is always replaced with the real peer address.
 	servers {
-		trusted_proxies static private_ranges
+		protocols h1 h2 h3
 	}
 }
 
@@ -17,10 +19,12 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "no-referrer"
 		-Server
+		-Via
 	}
 
 	handle /api/v1/* {
 		reverse_proxy api:8000 {
+			header_down -Via
 			health_uri /api/v1/health
 			health_interval 30s
 		}

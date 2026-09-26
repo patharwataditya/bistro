@@ -33,10 +33,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Remove
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,7 +69,7 @@ fun <T> SegmentedControl(
     val haptics = LocalHaptics.current
     val index = options.indexOf(selected).coerceAtLeast(0)
     BoxWithConstraints(
-        modifier.fillMaxWidth().height(44.dp).clip(Radii.md).background(c.surfaceSunken).padding(3.dp),
+        modifier.fillMaxWidth().height(48.dp).clip(Radii.md).background(c.surfaceSunken).padding(3.dp),
     ) {
         val segment = maxWidth / options.size
         val offset by animateDpAsState(segment * index, Motion.standard(), label = "seg")
@@ -123,7 +125,7 @@ fun <T> ChipRow(
             val bg by animateColorAsState(if (isSelected) c.ink else c.surface, Motion.fast(), label = "chip-bg")
             val fg by animateColorAsState(if (isSelected) c.onInk else c.textPrimary, Motion.fast(), label = "chip-fg")
             Box(
-                Modifier.height(40.dp).clip(Radii.pill).background(bg)
+                Modifier.height(48.dp).clip(Radii.pill).background(bg)
                     .border(1.dp, if (isSelected) Color.Transparent else c.border, Radii.pill)
                     .selectable(isSelected, role = Role.Tab) {
                         if (!isSelected) {
@@ -153,7 +155,7 @@ fun QuantityStepper(
 ) {
     val c = BistroTheme.colors
     val haptics = LocalHaptics.current
-    val size = if (compact) 36.dp else 44.dp
+    val size = if (compact) 40.dp else 48.dp
     Row(
         modifier.clip(Radii.pill).background(c.surfaceSunken).padding(3.dp)
             .semantics(mergeDescendants = false) { stateDescription = "$label $value" },
@@ -190,7 +192,7 @@ private fun StepperButton(icon: ImageVector, description: String, enabled: Boole
     val c = BistroTheme.colors
     val interaction = remember { MutableInteractionSource() }
     Box(
-        Modifier.size(size).pressScale(interaction, 0.88f).clip(Radii.pill)
+        Modifier.minimumInteractiveComponentSize().size(size).pressScale(interaction, 0.88f).clip(Radii.pill)
             .background(if (enabled) c.surface else Color.Transparent)
             .clickable(interaction, androidx.compose.material3.ripple(), enabled = enabled, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
@@ -226,9 +228,9 @@ fun ToggleRow(
     val haptics = LocalHaptics.current
     Row(
         modifier.fillMaxWidth().clip(Radii.md)
-            .clickable(role = Role.Switch) {
+            .toggleable(value = checked, role = Role.Switch) {
                 haptics.perform(Haptic.Toggle)
-                onCheckedChange(!checked)
+                onCheckedChange(it)
             }
             .padding(vertical = Spacing.md, horizontal = Spacing.xs),
         verticalAlignment = Alignment.CenterVertically,
@@ -239,10 +241,7 @@ fun ToggleRow(
         }
         androidx.compose.material3.Switch(
             checked = checked,
-            onCheckedChange = {
-                haptics.perform(Haptic.Toggle)
-                onCheckedChange(it)
-            },
+            onCheckedChange = null,
             colors = androidx.compose.material3.SwitchDefaults.colors(
                 checkedTrackColor = BistroTheme.colors.success,
                 checkedThumbColor = BistroTheme.colors.surface,

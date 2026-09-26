@@ -69,6 +69,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -148,7 +149,7 @@ fun MoreScreen() {
         ConfirmDialog(
             title = "Sign out?", message = "You'll need your password to sign back in on this device.",
             confirmLabel = "Sign out", destructive = true,
-            onConfirm = { confirmSignOut = false; scope.launch { container.session.signOut() } },
+            onConfirm = { confirmSignOut = false; container.session.signOut() },
             onDismiss = { confirmSignOut = false },
         )
     }
@@ -238,9 +239,9 @@ private fun ChangePasswordSheet(onDone: () -> Unit) {
     val messenger = LocalMessenger.current
     val haptics = LocalHaptics.current
     val scope = rememberCoroutineScope()
-    var current by rememberSaveable { mutableStateOf("") }
-    var next by rememberSaveable { mutableStateOf("") }
-    var confirm by rememberSaveable { mutableStateOf("") }
+    var current by remember { mutableStateOf("") }
+    var next by remember { mutableStateOf("") }
+    var confirm by remember { mutableStateOf("") }
     var busy by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     val strongEnough = next.length >= 8 && next.any { it.isLetter() } && next.any { !it.isLetter() }

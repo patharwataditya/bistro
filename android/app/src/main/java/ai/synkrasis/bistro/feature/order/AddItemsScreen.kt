@@ -251,6 +251,7 @@ private fun ReviewSheet(vm: AddItemsViewModel, currency: String) {
         title = "Review ${vm.count} item${if (vm.count == 1) "" else "s"}",
         subtitle = vm.order?.let { "Table ${it.tableName} · check #${it.orderNumber}" },
         onDismiss = { if (vm.submitting == null) vm.reviewing = false },
+        busy = vm.submitting != null,
         actions = {
             ActionPair(
                 secondary = {

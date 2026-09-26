@@ -84,7 +84,7 @@ fun RestaurantSection(form: GeneralForm, errors: Map<String, String>, canEdit: B
     SettingsCard("Restaurant", "Name, place and money") {
         BistroTextField(
             form.restaurantName, { v -> edit { it.copy(restaurantName = v.take(120)) } }, "Restaurant name", Modifier.fillMaxWidth(),
-            enabled = canEdit, error = errors["restaurant_name"],
+            enabled = canEdit && fullAccess, error = errors["restaurant_name"],
             supporting = if (!fullAccess && canEdit) "Renaming the restaurant needs full access" else "Shown on every location and bill",
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
         )

@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun OrderItemRow(
     item: OrderItem,
+    quantity: Int,
     currency: String,
     editable: Boolean,
     busy: Boolean,
@@ -59,7 +60,7 @@ fun OrderItemRow(
         } else {
             null
         },
-        onClickLabel = if (editable) "Add a note" else null,
+        onClickLabel = if (editable) "Edit note or remove" else null,
         elevated = false,
         contentPadding = PaddingValues(horizontal = Spacing.lg, vertical = Spacing.md),
     ) {
@@ -95,12 +96,15 @@ fun OrderItemRow(
                     textDecoration = if (voided) TextDecoration.LineThrough else null,
                 )
                 when {
-                    editable -> QuantityStepper(item.quantity, onQuantity, min = 0, max = 999, label = item.name, compact = true)
+                    editable -> QuantityStepper(quantity, onQuantity, min = 1, max = 999, label = item.name, compact = true)
                     canServe -> BistroButton("Serve", onServe, style = ButtonStyle.Primary, size = ButtonSize.Small, loading = busy)
                     item.status != OrderItemStatus.Voided && item.status != OrderItemStatus.Served -> {
                         val v = item.status.visual
                         StatusChip(v.label, v.tone, icon = v.icon)
                     }
+                }
+                if (canVoid) {
+                    BistroButton("Void", onVoid, style = ButtonStyle.Ghost, size = ButtonSize.Small)
                 }
             }
         }

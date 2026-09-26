@@ -48,7 +48,7 @@ def test_throttle_is_per_client_address(client, db):
         login(client, "owner", "wrong-pass-1")
     err(login(client, "owner"), 429, "RATE_LIMITED")
     keys = [t.key for t in db.scalars(select(LoginThrottle))]
-    assert keys == ["login:owner:testclient"]
+    assert sorted(keys) == ["login-ip:testclient", "login:owner:testclient"]
 
 
 def test_protected_route_requires_token(client):
@@ -87,18 +87,11 @@ def test_alg_none_rejected(client):
         "UNAUTHENTICATED")
 
 
-def test_refresh_rotates_and_reuse_revokes_session(client):
+def test_refresh_rotates(client):
     first = ok(login(client))
     second = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
     assert second["refresh_token"] != first["refresh_token"]
-    # Replaying the rotated token kills the session...
-    err(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}), 401,
-        "UNAUTHENTICATED")
-    # ...including the newest token and its access token.
-    err(client.post("/api/v1/auth/refresh", json={"refresh_token": second["refresh_token"]}),
-        401, "UNAUTHENTICATED")
-    err(client.get("/api/v1/me", headers={"Authorization": f"Bearer {second['access_token']}"}),
-        401, "UNAUTHENTICATED")
+    ok(client.get("/api/v1/me", headers={"Authorization": f"Bearer {second['access_token']}"}))
 
 
 def test_logout_revokes_session(client):
@@ -182,3 +175,40 @@ def test_commit_failure_is_reported_not_swallowed(client, db, monkeypatch):
     r = client.post("/api/v1/tables", json={"name": "Z9", "capacity": 2},
                     headers={"Authorization": f"Bearer {tokens['access_token']}"})
     assert r.status_code == 503
+
+
+def test_password_spraying_from_one_address_is_throttled(client, monkeypatch):
+    from app.services import auth as auth_service
+    monkeypatch.setattr(auth_service, "IP_MAX_FAILURES", 6)
+    for i in range(6):
+        err(login(client, f"user{i}", "Summer2026!"), 401, "INVALID_CREDENTIALS")
+    err(login(client, "owner"), 429, "RATE_LIMITED")
+
+
+def test_refresh_retry_within_grace_window_keeps_session(client):
+    first = ok(login(client))
+    ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    # Response "lost": the device retries with the same token a moment later.
+    again = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    ok(client.get("/api/v1/me", headers={"Authorization": f"Bearer {again['access_token']}"}))
+
+
+def test_refresh_reuse_after_grace_window_revokes(client, db):
+    from datetime import timedelta
+
+    from app.core.security import hash_refresh_token
+    from app.models import RefreshToken
+    first = ok(login(client))
+    second = ok(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}))
+    token = db.scalar(select(RefreshToken).where(
+        RefreshToken.token_hash == hash_refresh_token(first["refresh_token"])))
+    token.used_at = token.used_at - timedelta(minutes=5)
+    db.flush()
+    err(client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]}), 401,
+        "UNAUTHENTICATED")
+    err(client.post("/api/v1/auth/refresh", json={"refresh_token": second["refresh_token"]}), 401,
+        "UNAUTHENTICATED")
+
+
+def test_health_supports_head(client):
+    assert client.head("/api/v1/health").status_code == 200

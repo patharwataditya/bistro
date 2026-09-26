@@ -89,7 +89,7 @@ private fun CreateStaffSheet(
 ) {
     var fullName by rememberSaveable { mutableStateOf("") }
     var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
     var roleIds by remember { mutableStateOf(emptySet<Int>()) }
     val usernameOk = USERNAME.matches(username.trim())
     val valid = fullName.isNotBlank() && usernameOk && PasswordRules.problem(password) == null && roleIds.isNotEmpty()
@@ -246,7 +246,7 @@ private fun PasswordSection(member: StaffMember, isMe: Boolean, blocker: String?
         )
         return
     }
-    var password by rememberSaveable(member.id, member.version) { mutableStateOf("") }
+    var password by remember(member.id, member.version) { mutableStateOf("") }
     BistroTextField(
         password, { password = it.take(128) }, "New password", Modifier.fillMaxWidth(),
         password = true, supporting = PasswordRules.hint(password),

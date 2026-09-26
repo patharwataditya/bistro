@@ -97,6 +97,7 @@ fun MainShell(container: AppContainer, state: SessionState.SignedIn) {
         }
     }
 
+    navigator.selectTab = ::selectTab
     CompositionLocalProvider(
         LocalNavigator provides navigator,
         LocalSession provides session,
@@ -176,7 +177,7 @@ fun MainShell(container: AppContainer, state: SessionState.SignedIn) {
             MessageToast(
                 messenger.current,
                 Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
-                    .padding(bottom = if (!wide && onTopLevel) 80.dp else 16.dp),
+                    .padding(bottom = if (!wide && onTopLevel) 80.dp else 96.dp),
             )
         }
     }

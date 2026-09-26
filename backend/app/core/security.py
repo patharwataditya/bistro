@@ -1,5 +1,6 @@
 import hashlib
 import secrets
+import threading
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -11,22 +12,29 @@ from pwdlib.hashers.argon2 import Argon2Hasher
 from app.core.config import get_settings
 from app.core.errors import TokenExpired, Unauthenticated
 
-_password_hash = PasswordHash((Argon2Hasher(),))
+# Argon2id at the OWASP baseline (19 MiB, t=2, p=1). Existing hashes with other parameters
+# still verify and are transparently upgraded on the next successful login.
+_password_hash = PasswordHash((Argon2Hasher(memory_cost=19_456, time_cost=2, parallelism=1),))
+# Each hash holds ~19 MiB for its duration; bounding concurrency per worker bounds memory, so
+# a burst of logins can't exhaust the container (the rest wait briefly instead).
+_hash_slots = threading.BoundedSemaphore(3)
 # Verified against when the username does not exist, so response time does not reveal it.
 _DUMMY_HASH = _password_hash.hash("timing-equaliser-not-a-real-password")
 _ALGORITHM = "HS256"
 
 
 def hash_password(password: str) -> str:
-    return _password_hash.hash(password)
+    with _hash_slots:
+        return _password_hash.hash(password)
 
 
 def verify_password(password: str, password_hash: str | None) -> tuple[bool, str | None]:
     """Returns (valid, upgraded_hash_or_None). Always does the work, even with no hash."""
-    if password_hash is None:
-        _password_hash.verify(password, _DUMMY_HASH)
-        return False, None
-    return _password_hash.verify_and_update(password, password_hash)
+    with _hash_slots:
+        if password_hash is None:
+            _password_hash.verify(password, _DUMMY_HASH)
+            return False, None
+        return _password_hash.verify_and_update(password, password_hash)
 
 
 @dataclass(frozen=True)

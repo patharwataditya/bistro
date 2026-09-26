@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -39,7 +40,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 enum class ButtonStyle { Primary, Accent, Secondary, Danger, Ghost }
-enum class ButtonSize(val height: Dp, val horizontal: Dp) { Small(40.dp, 14.dp), Medium(48.dp, 18.dp), Large(56.dp, 22.dp) }
+enum class ButtonSize(val height: Dp, val horizontal: Dp) { Small(44.dp, 14.dp), Medium(48.dp, 18.dp), Large(56.dp, 22.dp) }
 
 /**
  * The one button. While [loading] it keeps its size, shows a spinner and ignores taps, which
@@ -74,6 +75,7 @@ fun BistroButton(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier = modifier
+            .minimumInteractiveComponentSize()
             .defaultMinSize(minHeight = size.height)
             .pressScale(interaction)
             .clip(Radii.md)

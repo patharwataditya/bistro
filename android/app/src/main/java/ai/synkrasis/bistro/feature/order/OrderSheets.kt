@@ -98,7 +98,15 @@ fun OrderSheets(order: Order, vm: OrderViewModel, menuOpen: Boolean, onMenuClose
             subtitle = "The kitchen sees this on the ticket.",
             onDismiss = { vm.noteTarget = null },
             actions = {
-                BistroButton("Save note", { vm.setNote(item, note) }, modifier = Modifier.fillMaxWidth(), loading = vm.working == "item-${item.id}")
+                ActionPair(
+                    secondary = {
+                        BistroButton("Remove item", { vm.removeItem(item) }, style = ButtonStyle.Danger, modifier = Modifier.fillMaxWidth(),
+                            enabled = vm.working == null)
+                    },
+                    primary = {
+                        BistroButton("Save note", { vm.setNote(item, note) }, modifier = Modifier.fillMaxWidth(), loading = vm.working == "item-${item.id}")
+                    },
+                )
             },
         ) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
@@ -161,6 +169,23 @@ fun OrderSheets(order: Order, vm: OrderViewModel, menuOpen: Boolean, onMenuClose
     }
 
     vm.tablePick?.let { pick -> TablePickerSheet(order, pick, vm) }
+    vm.confirmPick?.let { table ->
+        val merge = vm.tablePick == TablePick.Merge
+        ConfirmDialog(
+            title = if (merge) "Merge ${table.name} into this check?" else "Move to ${table.name}?",
+            message = if (merge) {
+                val src = table.activeOrder
+                "Check #${src?.orderNumber} (${src?.let { Format.money(it.subtotal, order.currencyCode) }}) joins #${order.orderNumber}. " +
+                    "${table.name} is released. This can't be undone."
+            } else {
+                "Check #${order.orderNumber} moves from ${order.tableName} to ${table.name}; ${order.tableName} is released."
+            },
+            confirmLabel = if (merge) "Merge" else "Move",
+            loading = vm.working != null,
+            onConfirm = { vm.pickTable(table) },
+            onDismiss = { vm.confirmPick = null },
+        )
+    }
 }
 
 @Composable
@@ -186,7 +211,7 @@ private fun TablePickerSheet(order: Order, pick: TablePick, vm: OrderViewModel) 
     val haptics = LocalHaptics.current
     val title = when (pick) {
         TablePick.Move -> "Move to which table?"
-        TablePick.Merge -> "Merge which table in?"
+        TablePick.Merge -> "Which table's check should join this one?"
         TablePick.Split -> "Split items to a new table"
     }
     val subtitle = when (pick) {
@@ -195,7 +220,16 @@ private fun TablePickerSheet(order: Order, pick: TablePick, vm: OrderViewModel) 
         TablePick.Split -> "Choose the items, then a free table for them."
     }
     // Only items whose kitchen ticket is finished (or never fired) can be split away.
-    val splittable = order.items.filter { it.status == OrderItemStatus.Pending || it.status == OrderItemStatus.Served }
+    val splittable = order.items.filter { item ->
+        when (item.status) {
+            OrderItemStatus.Pending -> true
+            // A served item may move only once its whole kitchen ticket is finished.
+            OrderItemStatus.Served -> order.items.filter { it.ticketId == item.ticketId }
+                .all { it.status == OrderItemStatus.Served || it.status == OrderItemStatus.Voided }
+            else -> false
+        }
+    }
+    val live = order.items.count { it.status != OrderItemStatus.Voided }
     BistroSheet(title = title, subtitle = subtitle, onDismiss = { vm.tablePick = null }) {
         if (pick == TablePick.Split) {
             if (splittable.isEmpty()) {
@@ -217,6 +251,15 @@ private fun TablePickerSheet(order: Order, pick: TablePick, vm: OrderViewModel) 
                     Text(Format.money(item.lineTotal, order.currencyCode), style = BistroTheme.type.amountSmall, color = c.textSecondary)
                 }
             }
+            if (vm.splitSelection.size >= live) {
+                Gap(Spacing.sm)
+                Text("That's every item — move the whole order instead.", style = BistroTheme.type.metadata, color = c.warning)
+            }
+            Gap(Spacing.md)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Guests moving", style = BistroTheme.type.bodyStrong, color = c.textPrimary, modifier = Modifier.weight(1f))
+                QuantityStepper(vm.splitGuests, { vm.splitGuests = it }, min = 1, max = 100, label = "Guests moving", compact = true)
+            }
             Gap(Spacing.lg)
             Text("TABLE", style = BistroTheme.type.statusLabel, color = c.textTertiary)
             Gap(Spacing.sm)
@@ -237,7 +280,8 @@ private fun TablePickerSheet(order: Order, pick: TablePick, vm: OrderViewModel) 
                         else -> "Every table is taken or unavailable right now."
                     })
                 }
-                val enabled = pick != TablePick.Split || vm.splitSelection.isNotEmpty()
+                val enabled = pick != TablePick.Split ||
+                    (vm.splitSelection.isNotEmpty() && vm.splitSelection.size < order.items.count { it.status != OrderItemStatus.Voided })
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.sm), verticalArrangement = Arrangement.spacedBy(Spacing.sm)) {
                     candidates.forEach { table -> PickTableTile(table, enabled, vm.working != null) { vm.pickTable(table) } }
                 }

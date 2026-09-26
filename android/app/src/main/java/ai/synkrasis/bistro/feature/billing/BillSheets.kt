@@ -71,6 +71,7 @@ private fun DiscountSheet(bill: Bill, vm: BillViewModel) {
         title = if (existing != null) "Edit discount" else "Discount",
         subtitle = "Subtotal ${Format.money(bill.subtotal, cur)}. Service and tax are recalculated on the new amount.",
         onDismiss = vm::dismissSheet,
+        busy = vm.working != null,
         actions = {
             val apply: @Composable () -> Unit = {
                 BistroButton(
@@ -139,7 +140,7 @@ private fun RefundSheet(bill: Bill, vm: BillViewModel) {
     val c = BistroTheme.colors
     val options = bill.refundableByMethod()
     if (options.isEmpty()) {
-        BistroSheet(title = "Refund", onDismiss = vm::dismissSheet) {
+        BistroSheet(title = "Refund", onDismiss = vm::dismissSheet, busy = vm.working != null) {
             Text("Nothing is held on this bill, so there's nothing to refund.", style = BistroTheme.type.body, color = c.textSecondary)
             Gap(Spacing.xl)
         }
@@ -170,6 +171,7 @@ private fun RefundSheet(bill: Bill, vm: BillViewModel) {
             "Money goes back on the method it was paid with."
         },
         onDismiss = vm::dismissSheet,
+        busy = vm.working != null,
         actions = {
             BistroButton(
                 text = if (amount != null && valid) "Refund ${Format.money(amount, cur)}" else "Refund",

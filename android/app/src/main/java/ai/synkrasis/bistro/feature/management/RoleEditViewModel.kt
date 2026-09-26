@@ -67,11 +67,13 @@ class RoleEditViewModel(private val container: AppContainer, val roleId: Int) : 
                 }
             }
         }
+        // While edits are unsaved, keep the snapshot they started from (its version too), so a
+        // concurrent change by someone else surfaces as a conflict rather than being reverted.
+        if (loaded && dirty && combined is ApiResult.Success) return@withLock
         state = state.reduce(combined)
         if (combined is ApiResult.Success) {
             val fresh = RoleForm.of(combined.value.role)
-            // Keep unsaved edits across background refreshes; adopt the server copy otherwise.
-            if (!loaded || !dirty) form = fresh
+            form = fresh
             baseline = fresh
             loaded = true
         }
