@@ -354,6 +354,7 @@ data class PaymentRecord(
     val changeDue: BigDecimal,
     val reference: String?,
     val reason: String?,
+    val isCorrection: Boolean = false,
     val createdByName: String,
     val createdAt: Instant,
 )
@@ -567,11 +568,11 @@ data class TableUsage(val tableName: String, val orders: Int, val revenue: BigDe
 
 @Immutable
 @Serializable
-data class DailySales(val date: LocalDate, val netSales: BigDecimal, val orders: Int)
+data class DailySales(val date: LocalDate, val grossSales: BigDecimal, val refunds: BigDecimal, val netSales: BigDecimal, val orders: Int)
 
 @Immutable
 @Serializable
-data class HourlySales(val hour: Int, val netSales: BigDecimal, val orders: Int)
+data class HourlySales(val hour: Int, val sales: BigDecimal, val orders: Int)
 
 @Immutable
 @Serializable
