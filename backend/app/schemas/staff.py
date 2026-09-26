@@ -55,6 +55,7 @@ class UserOut(OutputModel):
     created_at: datetime
     version: int
     manageable: bool
+    password_resettable: bool
 
 
 class UserCreate(InputModel):

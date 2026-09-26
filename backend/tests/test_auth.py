@@ -29,11 +29,26 @@ def test_wrong_password_and_unknown_user_look_identical(client):
     assert a["message"] == b["message"]
 
 
-def test_lockout_after_repeated_failures(client):
+def test_throttle_after_repeated_failures(client):
     for _ in range(5):
         err(login(client, "cashier", "wrong-pass-1"), 401, "INVALID_CREDENTIALS")
-    # Even the correct password is refused while locked.
-    err(login(client, "cashier"), 423, "ACCOUNT_LOCKED")
+    # Even the correct password is refused while throttled.
+    err(login(client, "cashier"), 429, "RATE_LIMITED")
+
+
+def test_throttle_does_not_reveal_whether_user_exists(client):
+    for _ in range(5):
+        err(login(client, "nobody-here", "wrong-pass-1"), 401, "INVALID_CREDENTIALS")
+    err(login(client, "nobody-here", "wrong-pass-1"), 429, "RATE_LIMITED")
+
+
+def test_throttle_is_per_client_address(client, db):
+    from app.models import LoginThrottle
+    for _ in range(5):
+        login(client, "owner", "wrong-pass-1")
+    err(login(client, "owner"), 429, "RATE_LIMITED")
+    keys = [t.key for t in db.scalars(select(LoginThrottle))]
+    assert keys == ["login:owner:testclient"]
 
 
 def test_protected_route_requires_token(client):
@@ -89,8 +104,7 @@ def test_refresh_rotates_and_reuse_revokes_session(client):
 def test_logout_revokes_session(client):
     tokens = ok(login(client))
     headers = {"Authorization": f"Bearer {tokens['access_token']}"}
-    ok(client.post("/api/v1/auth/logout", json={"refresh_token": tokens["refresh_token"]},
-                   headers=headers), 204)
+    ok(client.post("/api/v1/auth/logout", headers=headers), 204)
     err(client.get("/api/v1/me", headers=headers), 401, "UNAUTHENTICATED")
     err(client.post("/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]}), 401,
         "UNAUTHENTICATED")
@@ -103,7 +117,8 @@ def test_deactivated_user_loses_access_immediately(client, db):
     db.commit()
     err(client.get("/api/v1/me", headers={"Authorization": f"Bearer {tokens['access_token']}"}),
         403, "ACCOUNT_INACTIVE")
-    err(login(client, "server"), 403, "ACCOUNT_INACTIVE")
+    # At login a deactivated account is indistinguishable from a wrong password.
+    err(login(client, "server"), 401, "INVALID_CREDENTIALS")
 
 
 def test_change_password_signs_out_other_sessions(client):
@@ -124,7 +139,7 @@ def test_change_password_requires_current_and_strength(client):
     h = {"Authorization": f"Bearer {tokens['access_token']}"}
     err(client.post("/api/v1/me/password", headers=h,
                     json={"current_password": "wrong", "new_password": "n3w-password!"}),
-        401, "INVALID_CREDENTIALS")
+        422, "VALIDATION_ERROR")
     err(client.post("/api/v1/me/password", headers=h,
                     json={"current_password": DEMO_PASSWORD, "new_password": "abcdefghij"}),
         422, "VALIDATION_ERROR")
@@ -143,3 +158,27 @@ def test_oversized_body_rejected(client):
 
 def test_health(client):
     assert ok(client.get("/api/v1/health"))["status"] == "ok"
+
+
+def test_chunked_oversized_body_rejected(client):
+    def chunks():
+        for _ in range(40):
+            yield b"x" * 10_000
+
+    r = client.post("/api/v1/auth/login", content=chunks(),
+                    headers={"content-type": "application/json"})
+    assert r.status_code == 413
+
+
+def test_commit_failure_is_reported_not_swallowed(client, db, monkeypatch):
+    """The commit runs before the response: if it fails the client must not see success."""
+    tokens = ok(login(client, "manager"))
+    from sqlalchemy.exc import OperationalError
+
+    def boom():
+        raise OperationalError("COMMIT", {}, Exception("connection lost"))
+
+    monkeypatch.setattr(db, "commit", boom)
+    r = client.post("/api/v1/tables", json={"name": "Z9", "capacity": 2},
+                    headers={"Authorization": f"Bearer {tokens['access_token']}"})
+    assert r.status_code == 503

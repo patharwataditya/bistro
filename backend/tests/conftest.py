@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from alembic import command
 from alembic.config import Config
+from fastapi import Request
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -49,7 +50,7 @@ def db() -> Iterator[Session]:
     connection = engine.connect()
     outer = connection.begin()
     session = Session(bind=connection, join_transaction_mode="create_savepoint",
-                      expire_on_commit=False, autoflush=False)
+                      expire_on_commit=False)
     yield session
     session.close()
     outer.rollback()
@@ -58,10 +59,10 @@ def db() -> Iterator[Session]:
 
 @pytest.fixture
 def client(db: Session) -> Iterator[TestClient]:
-    def override() -> Iterator[Session]:
+    def override(request: Request) -> Iterator[Session]:
+        request.state.db = db
         try:
             yield db
-            db.commit()
         except BaseException:
             db.rollback()
             raise

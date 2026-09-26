@@ -201,3 +201,41 @@ def test_audit_trail_written_for_staff_changes(as_user, db):
     ok(mgr.post(f"/users/{s['id']}/deactivate", json={"version": s["version"]}))
     actions = set(db.scalars(select(AuditLog.action)))
     assert "staff.deactivated" in actions
+
+
+def test_cannot_edit_role_held_by_someone_with_more_access(as_user):
+    owner = as_user("owner")
+    role = ok(owner.post("/roles", json={"name": "Shared", "permissions": ["tables.view"]}), 201)
+    ok(owner.post("/users", json={"username": "owner2", "full_name": "Second Owner",
+                                  "password": "s3cure-pass",
+                                  "role_ids": [role_id(owner, "Owner"), role["id"]]}), 201)
+    admin = as_user("admin")
+    listed = next(r for r in ok(admin.get("/roles")) if r["id"] == role["id"])
+    assert not listed["editable"]
+    err(admin.patch(f"/roles/{role['id']}", json={"version": role["version"], "permissions": []}),
+        403, "PERMISSION_DENIED")
+
+
+def test_peers_cannot_reset_each_others_password(as_user):
+    owner = as_user("owner")
+    ok(owner.post("/users", json={"username": "owner2", "full_name": "Second Owner",
+                                  "password": "s3cure-pass",
+                                  "role_ids": [role_id(owner, "Owner")]}), 201)
+    o2 = user(owner, "owner2")
+    assert o2["manageable"] and not o2["password_resettable"]
+    err(owner.post(f"/users/{o2['id']}/password",
+                   json={"version": o2["version"], "new_password": "takeover-1"}),
+        403, "PERMISSION_DENIED")
+
+
+def test_deactivated_actor_cannot_mutate_staff(as_user, db):
+    from sqlalchemy import select
+
+    from app.models import User
+    mgr = as_user("manager")
+    s = user(mgr, "server")
+    m = db.scalar(select(User).where(User.username == "manager"))
+    m.is_active = False
+    db.flush()
+    r = mgr.post(f"/users/{s['id']}/deactivate", json={"version": s["version"]})
+    assert r.status_code == 403

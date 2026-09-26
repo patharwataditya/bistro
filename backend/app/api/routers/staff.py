@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy import select
 
 from app.api.deps import DB, Actor, require
+from app.api.routing import TransactionalRoute
 from app.models import Permission
 from app.schemas.common import Page, VersionIn
 from app.schemas.staff import (
@@ -18,7 +19,7 @@ from app.schemas.staff import (
 )
 from app.services import staff
 
-router = APIRouter(tags=["staff"])
+router = APIRouter(route_class=TransactionalRoute, tags=["staff"])
 
 
 @router.get("/users", response_model=Page[UserOut])

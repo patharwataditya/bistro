@@ -2,6 +2,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -56,6 +57,8 @@ class Bill(TimestampMixin, Base):
     discount_reason: Mapped[str | None] = mapped_column(String(200))
     service_charge_percent: Mapped[Decimal] = mapped_column(Numeric(5, 2))
     service_charge_amount: Mapped[Decimal] = mapped_column(MONEY)
+    service_charge_taxable: Mapped[bool] = mapped_column(Boolean)
+    rounding_increment: Mapped[Decimal] = mapped_column(Numeric(6, 2))
     tax_total: Mapped[Decimal] = mapped_column(MONEY)
     round_off: Mapped[Decimal] = mapped_column(MONEY)
     total: Mapped[Decimal] = mapped_column(MONEY)

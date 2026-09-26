@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from datetime import datetime
 
+from fastapi import Request
 from sqlalchemy import DateTime, MetaData, create_engine, func
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -44,7 +45,7 @@ def get_engine() -> Engine:
             pool_pre_ping=True,
             pool_recycle=1800,
         )
-        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False, autoflush=False)
+        _session_factory = sessionmaker(bind=_engine, expire_on_commit=False)
     return _engine
 
 
@@ -54,12 +55,17 @@ def session_factory() -> sessionmaker[Session]:
     return _session_factory
 
 
-def get_db() -> Iterator[Session]:
-    """One transaction per request: commit on success, roll back on any exception."""
+def get_db(request: Request) -> Iterator[Session]:
+    """One transaction per request.
+
+    The commit itself happens in `TransactionalRoute` *before* the response is sent, so a
+    failed commit becomes an error response instead of a 200 for work that never landed.
+    Anything still uncommitted here (an exception path) is rolled back by close().
+    """
     session = session_factory()()
+    request.state.db = session
     try:
         yield session
-        session.commit()
     except BaseException:
         session.rollback()
         raise

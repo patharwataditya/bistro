@@ -1,11 +1,12 @@
 """Staff accounts and roles, with the anti-privilege-escalation rules from ARCHITECTURE §5."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api.deps import Actor
 from app.core.errors import (
+    AccountInactive,
     Conflict,
     InvalidTransition,
     NotFound,
@@ -31,9 +32,26 @@ from app.services.auth import revoke_all_sessions
 
 # ---------- rules ----------
 
+def _serialize(db: Session, actor: Actor) -> None:
+    """Serialise all staff/role mutations of a restaurant and re-validate the actor inside
+    the lock. Without this, two owners deactivating each other concurrently could both
+    succeed (each counting the other as still active) and leave the restaurant ownerless."""
+    db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+               {"k": f"staff:{actor.restaurant_id}"})
+    db.refresh(actor.user)
+    db.refresh(actor.user, attribute_names=["roles"])
+    if not actor.user.is_active:
+        raise AccountInactive("This account has been deactivated.")
+    actor.permissions = frozenset(actor.user.permission_codes)
+
+
 def can_manage_user(actor: Actor, target: User) -> bool:
     """You may manage someone only if you already hold every permission they hold."""
     return target.id != actor.id and target.permission_codes <= actor.permissions
+
+
+def can_reset_password(actor: Actor, target: User) -> bool:
+    return target.id != actor.id and target.permission_codes < actor.permissions
 
 
 def _ensure_can_manage(actor: Actor, target: User) -> None:
@@ -43,6 +61,14 @@ def _ensure_can_manage(actor: Actor, target: User) -> None:
         raise PermissionDenied("This person has access you don't have, so you can't manage them.")
 
 
+def _ensure_can_reset_password(actor: Actor, target: User) -> None:
+    # Strictly more access, not merely equal: peers (owner/owner, admin/admin) must not be
+    # able to take over each other's accounts and act under their name.
+    _ensure_can_manage(actor, target)
+    if not target.permission_codes < actor.permissions:
+        raise PermissionDenied("Only someone with more access can reset this password.")
+
+
 def _ensure_can_grant(actor: Actor, roles: list[Role]) -> None:
     for role in roles:
         if not role.permission_codes <= actor.permissions:
@@ -50,9 +76,11 @@ def _ensure_can_grant(actor: Actor, roles: list[Role]) -> None:
                 f"You can't assign the {role.name} role: it includes access you don't have.")
 
 
-def role_editable(actor: Actor, role: Role) -> bool:
+def role_editable(actor: Actor, role: Role, members: list[User]) -> bool:
+    """Mirror of `_ensure_role_editable`, so the app never offers an edit the API refuses."""
     return (not role.is_system and role.permission_codes <= actor.permissions
-            and role not in actor.user.roles)
+            and role not in actor.user.roles
+            and all(m.permission_codes <= actor.permissions for m in members))
 
 
 # ---------- lookups ----------
@@ -60,7 +88,7 @@ def role_editable(actor: Actor, role: Role) -> bool:
 def _get_user(db: Session, actor: Actor, user_id: int, *, lock: bool = False) -> User:
     stmt = select(User).where(User.id == user_id, User.restaurant_id == actor.restaurant_id)
     if lock:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     user = db.scalar(stmt)
     if user is None:
         raise NotFound("Staff member not found.")
@@ -70,7 +98,7 @@ def _get_user(db: Session, actor: Actor, user_id: int, *, lock: bool = False) ->
 def _get_role(db: Session, actor: Actor, role_id: int, *, lock: bool = False) -> Role:
     stmt = select(Role).where(Role.id == role_id, Role.restaurant_id == actor.restaurant_id)
     if lock:
-        stmt = stmt.with_for_update()
+        stmt = stmt.with_for_update().execution_options(populate_existing=True)
     role = db.scalar(stmt)
     if role is None:
         raise NotFound("Role not found.")
@@ -108,6 +136,7 @@ def to_user_out(actor: Actor, user: User) -> UserOut:
         roles=[RoleSummary(id=r.id, name=r.name) for r in user.roles],
         last_login_at=user.last_login_at, created_at=user.created_at, version=user.version,
         manageable=can_manage_user(actor, user),
+        password_resettable=can_reset_password(actor, user),
     )
 
 
@@ -131,6 +160,7 @@ def get_user(db: Session, actor: Actor, user_id: int) -> User:
 
 
 def create_user(db: Session, actor: Actor, data: UserCreate) -> User:
+    _serialize(db, actor)
     roles = _resolve_roles(db, actor, data.role_ids)
     _ensure_can_grant(actor, roles)
     if db.scalar(select(User.id).where(func.lower(User.username) == data.username.lower())):
@@ -152,6 +182,7 @@ def create_user(db: Session, actor: Actor, data: UserCreate) -> User:
 
 
 def update_user(db: Session, actor: Actor, user_id: int, data: UserUpdate) -> User:
+    _serialize(db, actor)
     user = _get_user(db, actor, user_id, lock=True)
     _ensure_can_manage(actor, user)
     if user.version != data.version:
@@ -181,6 +212,7 @@ def update_user(db: Session, actor: Actor, user_id: int, data: UserUpdate) -> Us
 
 
 def set_active(db: Session, actor: Actor, user_id: int, active: bool, version: int) -> User:
+    _serialize(db, actor)
     user = _get_user(db, actor, user_id, lock=True)
     _ensure_can_manage(actor, user)
     if user.version != version:
@@ -202,13 +234,12 @@ def set_active(db: Session, actor: Actor, user_id: int, active: bool, version: i
 
 def reset_password(db: Session, actor: Actor, user_id: int, new_password: str,
                    version: int) -> User:
+    _serialize(db, actor)
     user = _get_user(db, actor, user_id, lock=True)
-    _ensure_can_manage(actor, user)
+    _ensure_can_reset_password(actor, user)
     if user.version != version:
         raise StaleVersion("staff member", user.version)
     user.password_hash = hash_password(new_password)
-    user.failed_login_count = 0
-    user.locked_until = None
     revoke_all_sessions(db, user)
     user.version += 1
     audit.record(db, actor, "staff.password_reset", "user", user.id,
@@ -219,33 +250,34 @@ def reset_password(db: Session, actor: Actor, user_id: int, new_password: str,
 
 # ---------- roles ----------
 
-def _member_counts(db: Session, role_ids: list[int]) -> dict[int, int]:
-    rows = db.execute(
-        select(user_roles.c.role_id, func.count())
-        .join(User, User.id == user_roles.c.user_id)
-        .where(user_roles.c.role_id.in_(role_ids), User.is_active)
-        .group_by(user_roles.c.role_id)
-    ).all()
-    return {role_id: count for role_id, count in rows}
+def _members(db: Session, actor: Actor) -> dict[int, list[User]]:
+    """Role id → users holding it (active or not). Restaurants have tens of staff, not
+    thousands, so loading them with their roles is one cheap query."""
+    by_role: dict[int, list[User]] = {}
+    for user in db.scalars(select(User).where(User.restaurant_id == actor.restaurant_id)):
+        for role in user.roles:
+            by_role.setdefault(role.id, []).append(user)
+    return by_role
 
 
-def to_role_out(actor: Actor, role: Role, member_count: int) -> RoleOut:
+def to_role_out(actor: Actor, role: Role, members: list[User]) -> RoleOut:
     return RoleOut(
         id=role.id, name=role.name, description=role.description, is_system=role.is_system,
-        permissions=sorted(role.permission_codes), member_count=member_count,
-        version=role.version, editable=role_editable(actor, role),
+        permissions=sorted(role.permission_codes),
+        member_count=sum(1 for m in members if m.is_active),
+        version=role.version, editable=role_editable(actor, role, members),
     )
 
 
 def list_roles(db: Session, actor: Actor) -> list[RoleOut]:
     roles = list(db.scalars(select(Role).where(Role.restaurant_id == actor.restaurant_id)
                             .order_by(Role.is_system.desc(), func.lower(Role.name))))
-    counts = _member_counts(db, [r.id for r in roles])
-    return [to_role_out(actor, r, counts.get(r.id, 0)) for r in roles]
+    members = _members(db, actor)
+    return [to_role_out(actor, r, members.get(r.id, [])) for r in roles]
 
 
 def role_out(db: Session, actor: Actor, role: Role) -> RoleOut:
-    return to_role_out(actor, role, _member_counts(db, [role.id]).get(role.id, 0))
+    return to_role_out(actor, role, _members(db, actor).get(role.id, []))
 
 
 def get_role(db: Session, actor: Actor, role_id: int) -> Role:
@@ -274,6 +306,7 @@ def _ensure_name_free(db: Session, actor: Actor, name: str, exclude_id: int | No
 
 
 def create_role(db: Session, actor: Actor, data: RoleCreate) -> Role:
+    _serialize(db, actor)
     _ensure_name_free(db, actor, data.name, None)
     role = Role(restaurant_id=actor.restaurant_id, name=data.name, description=data.description,
                 permissions=_resolve_permissions(db, actor, data.permissions))
@@ -284,18 +317,25 @@ def create_role(db: Session, actor: Actor, data: RoleCreate) -> Role:
     return role
 
 
-def _ensure_role_editable(actor: Actor, role: Role) -> None:
+def _ensure_role_editable(db: Session, actor: Actor, role: Role) -> None:
     if role.is_system:
         raise PermissionDenied("The Owner role is built in and can't be changed.")
     if role in actor.user.roles:
         raise PermissionDenied("You can't edit a role you hold. Ask another manager.")
     if not role.permission_codes <= actor.permissions:
         raise PermissionDenied("This role includes access you don't have, so you can't edit it.")
+    # Editing a role changes the access of everyone holding it, so it is only allowed when
+    # the actor could manage each of those people directly.
+    members = db.scalars(select(User).join(user_roles).where(user_roles.c.role_id == role.id))
+    if any(not m.permission_codes <= actor.permissions for m in members):
+        raise PermissionDenied("Someone with this role has access you don't have, "
+                               "so you can't edit it.")
 
 
 def update_role(db: Session, actor: Actor, role_id: int, data: RoleUpdate) -> Role:
+    _serialize(db, actor)
     role = _get_role(db, actor, role_id, lock=True)
-    _ensure_role_editable(actor, role)
+    _ensure_role_editable(db, actor, role)
     if role.version != data.version:
         raise StaleVersion("role", role.version)
     if data.name is not None and data.name != role.name:
@@ -319,8 +359,9 @@ def update_role(db: Session, actor: Actor, role_id: int, data: RoleUpdate) -> Ro
 
 
 def delete_role(db: Session, actor: Actor, role_id: int) -> None:
+    _serialize(db, actor)
     role = _get_role(db, actor, role_id, lock=True)
-    _ensure_role_editable(actor, role)
+    _ensure_role_editable(db, actor, role)
     in_use = db.scalar(select(func.count()).select_from(user_roles)
                        .where(user_roles.c.role_id == role.id)) or 0
     if in_use:

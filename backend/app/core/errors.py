@@ -77,3 +77,8 @@ class InvalidTransition(AppError):
 class IdempotencyMismatch(AppError):
     status_code = 422
     code = "IDEMPOTENCY_MISMATCH"
+
+
+class RateLimited(AppError):
+    status_code = 429
+    code = "RATE_LIMITED"

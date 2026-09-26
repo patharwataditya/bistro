@@ -1,21 +1,22 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Body, status
+from fastapi import APIRouter, Request, status
 
 from app.api.deps import DB, CurrentActor
+from app.api.routing import TransactionalRoute
 from app.core.permissions import PERMISSIONS
 from app.models import Restaurant
 from app.schemas.auth import ChangePasswordIn, LoginIn, RefreshIn, TokenPair
 from app.schemas.staff import LocationBrief, MeOut, RoleSummary
 from app.services import audit, auth
 
-router = APIRouter(tags=["auth"])
+router = APIRouter(route_class=TransactionalRoute, tags=["auth"])
 
 
 @router.post("/auth/login", response_model=TokenPair)
-def login(body: LoginIn, db: DB) -> TokenPair:
-    """Exchange credentials for an access token (15 min) and a rotating refresh token."""
-    return auth.login(db, body.username, body.password, body.device_label)
+def login(body: LoginIn, db: DB, request: Request) -> TokenPair:
+    """Exchange credentials for an access token (15 min) and a rotating refresh token.
+    Repeated failures for a username from one address are throttled (429 RATE_LIMITED)."""
+    client_ip = request.client.host if request.client else "unknown"
+    return auth.login(db, body.username, body.password, body.device_label, client_ip)
 
 
 @router.post("/auth/refresh", response_model=TokenPair)
@@ -25,9 +26,9 @@ def refresh(body: RefreshIn, db: DB) -> TokenPair:
 
 
 @router.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
-def logout(actor: CurrentActor, db: DB,
-           body: Annotated[RefreshIn | None, Body()] = None) -> None:
-    auth.logout(db, actor.id, body.refresh_token if body else None)
+def logout(actor: CurrentActor, db: DB) -> None:
+    """End the current session: its access and refresh tokens stop working immediately."""
+    auth.logout(db, actor.id, actor.session_id)
 
 
 @router.get("/me", response_model=MeOut)

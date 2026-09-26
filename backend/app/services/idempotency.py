@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import Session
 
 from app.core.errors import IdempotencyMismatch, ValidationFailed
@@ -61,7 +61,7 @@ def run_idempotent(
 
 def purge_expired(db: Session, older_than_hours: int = 48) -> int:
     result = db.execute(
-        IdempotencyRecord.__table__.delete().where(
+        delete(IdempotencyRecord).where(
             IdempotencyRecord.created_at < func.now() - text(f"interval '{int(older_than_hours)} hours'")
         )
     )

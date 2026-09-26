@@ -10,7 +10,7 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_prefix="BISTRO_", extra="ignore")
 
-    environment: Literal["development", "test", "production"] = "development"
+    environment: Literal["development", "test", "production"] = "production"
     database_url: str = "postgresql+psycopg://bistro:bistro@localhost:5544/bistro"
     jwt_secret: SecretStr = SecretStr("dev-only-insecure-secret-change-me-0123456789")
     jwt_issuer: str = "bistro-api"
@@ -28,10 +28,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":
+        # Fail closed: anything that is not explicitly development/test is production, and
+        # production refuses to start with the public development secret.
         if self.is_production:
             secret = self.jwt_secret.get_secret_value()
             if len(secret) < 32 or secret.startswith("dev-only"):
-                raise ValueError("BISTRO_JWT_SECRET must be a strong, non-default secret in production")
+                raise ValueError("BISTRO_JWT_SECRET must be a strong, non-default secret")
         return self
 
 

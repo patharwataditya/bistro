@@ -36,16 +36,37 @@ class RequestContextMiddleware:
             structlog.contextvars.clear_contextvars()
             return
 
-        received = 0
+        if declared is None and scope.get("method") in ("POST", "PUT", "PATCH", "DELETE"):
+            # No Content-Length (chunked): buffer up to the cap here, so an oversized body is
+            # refused with 413 before the app's own parser ever sees it.
+            chunks: list[bytes] = []
+            size = 0
+            more = True
+            while more:
+                message = await receive()
+                if message["type"] != "http.request":
+                    break
+                chunk = message.get("body", b"")
+                size += len(chunk)
+                if size > self.max_body_bytes:
+                    await _reject_too_large(send, request_id)
+                    structlog.contextvars.clear_contextvars()
+                    return
+                chunks.append(chunk)
+                more = message.get("more_body", False)
+            buffered = b"".join(chunks)
+            delivered = False
 
-        async def limited_receive() -> Message:
-            nonlocal received
-            message = await receive()
-            if message["type"] == "http.request":
-                received += len(message.get("body", b""))
-                if received > self.max_body_bytes:
-                    raise _BodyTooLarge
-            return message
+            async def replay() -> Message:
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {"type": "http.request", "body": buffered, "more_body": False}
+                return await receive()
+
+            app_receive: Receive = replay
+        else:
+            app_receive = receive
 
         async def send_wrapper(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -55,24 +76,16 @@ class RequestContextMiddleware:
             await send(message)
 
         try:
-            await self.app(scope, limited_receive, send_wrapper)
-        except _BodyTooLarge:
-            await _reject_too_large(send, request_id)
-            status_holder["status"] = 413
+            await self.app(scope, app_receive, send_wrapper)
         finally:
             duration_ms = round((time.perf_counter() - start) * 1000, 1)
             path = scope.get("path", "")
             if path != "/api/v1/health":
+                state = scope.get("state") or {}
                 log.info("request", method=scope.get("method"), path=path,
                          status=status_holder["status"], duration_ms=duration_ms,
-                         user_id=getattr(scope.get("state", {}), "user_id", None)
-                         if not isinstance(scope.get("state"), dict)
-                         else scope["state"].get("user_id"))
+                         user_id=state.get("user_id") if isinstance(state, dict) else None)
             structlog.contextvars.clear_contextvars()
-
-
-class _BodyTooLarge(Exception):
-    pass
 
 
 async def _reject_too_large(send: Send, request_id: str) -> None:

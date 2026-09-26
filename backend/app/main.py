@@ -11,7 +11,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.middleware import RequestContextMiddleware
-from app.api.routers import auth, staff
+from app.api.routers import auth, billing, floor, insights, kitchen, menu, orders, staff
+from app.api.routers import settings as settings_router
 from app.core.config import get_settings
 from app.core.db import get_engine
 from app.core.errors import AppError
@@ -101,7 +102,8 @@ def create_app() -> FastAPI:
         return JSONResponse({"status": "ok", "database": "ok",
                              "time": datetime.now(UTC).isoformat()})
 
-    for module in (auth, staff):
+    for module in (auth, staff, floor, menu, orders, kitchen, billing, settings_router,
+                   insights):
         api.include_router(module.router)
     app.include_router(api)
     return app

@@ -1,3 +1,4 @@
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
@@ -24,6 +25,7 @@ class Actor:
     user: User
     location: Location
     permissions: frozenset[str]
+    session_id: uuid.UUID
 
     @property
     def id(self) -> int:
@@ -66,7 +68,8 @@ def get_actor(
     if location is None:
         raise Unauthenticated("Your account is not assigned to a location.")
     request.state.user_id = user.id
-    return Actor(user=user, location=location, permissions=frozenset(user.permission_codes))
+    return Actor(user=user, location=location, permissions=frozenset(user.permission_codes),
+                 session_id=session.id)
 
 
 CurrentActor = Annotated[Actor, Depends(get_actor)]

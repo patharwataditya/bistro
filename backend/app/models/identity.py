@@ -79,8 +79,6 @@ class User(TimestampMixin, Base):
     password_hash: Mapped[str] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     token_version: Mapped[int] = mapped_column(Integer, default=1)
-    failed_login_count: Mapped[int] = mapped_column(Integer, default=0)
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     version: Mapped[int] = mapped_column(Integer, default=1)
 
@@ -123,3 +121,19 @@ class RefreshToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
                                                  server_default=func.now())
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class LoginThrottle(Base):
+    """Failed-attempt counter per (purpose, username, client IP).
+
+    Keyed by IP as well as username so nobody can lock the owner out from the internet, and
+    applied to unknown usernames too so a lockout never reveals that an account exists.
+    """
+
+    __tablename__ = "login_throttles"
+
+    key: Mapped[str] = mapped_column(String(200), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now(), index=True)
