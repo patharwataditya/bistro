@@ -110,10 +110,11 @@ fun <T> ChipRow(
     onSelect: (T) -> Unit,
     label: (T) -> String,
     modifier: Modifier = Modifier,
+    edgePadding: androidx.compose.ui.unit.Dp = Spacing.gutter,
 ) {
     val haptics = LocalHaptics.current
     Row(
-        modifier.horizontalScroll(rememberScrollState()).padding(horizontal = Spacing.gutter).selectableGroup(),
+        modifier.horizontalScroll(rememberScrollState()).padding(horizontal = edgePadding).selectableGroup(),
         horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
     ) {
         options.forEach { option ->
