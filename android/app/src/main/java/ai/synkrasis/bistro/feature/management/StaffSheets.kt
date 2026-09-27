@@ -186,9 +186,21 @@ private fun StaffDetailSheet(member: StaffMember, roles: List<RoleOption>, vm: S
         DetailLine("Last sign-in", member.lastLoginAt?.let { Format.dateTime(it, session.zone) } ?: "Never")
         DetailLine("Added", Format.dateTime(member.createdAt, session.zone))
 
-        RolesSection(member, roles, blocker, vm)
-        if (session.can(Permission.STAFF_UPDATE)) PasswordSection(member, isMe, blocker, vm)
-        if (session.can(Permission.STAFF_DEACTIVATE)) StatusSection(member, blocker, vm)
+        if (blocker != null) {
+            // Nothing here can be changed by this user: say why once, not under every section.
+            GroupLabel("Roles")
+            if (member.roles.isEmpty()) {
+                Text("No roles", style = BistroTheme.type.supporting, color = BistroTheme.colors.textSecondary)
+            } else {
+                RolePills(member.roles)
+            }
+            Gap(Spacing.md)
+            NoticeCard(blocker, icon = Icons.Rounded.Lock)
+        } else {
+            RolesSection(member, roles, null, vm)
+            if (session.can(Permission.STAFF_UPDATE)) PasswordSection(member, isMe, null, vm)
+            if (session.can(Permission.STAFF_DEACTIVATE)) StatusSection(member, null, vm)
+        }
         Gap(Spacing.lg)
     }
 }

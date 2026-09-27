@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
@@ -32,9 +33,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -100,14 +103,28 @@ fun BistroButton(
             if (isLoading) {
                 CircularProgressIndicator(Modifier.size(20.dp), color = content, strokeWidth = 2.dp)
             } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
-                ) {
-                    if (icon != null) Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
-                    Text(text, style = BistroTheme.type.button, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (trailing != null) {
-                        Text(trailing, style = BistroTheme.type.button, color = content.copy(alpha = 0.72f), maxLines = 1)
+                // On narrow buttons the words matter most: drop the icon first, then the
+                // trailing detail, before ever truncating the label ("Accept", not "A…").
+                val measurer = rememberTextMeasurer()
+                val style = BistroTheme.type.button
+                BoxWithConstraints {
+                    val density = LocalDensity.current
+                    val gap = with(density) { Spacing.sm.toPx() }
+                    val labelW = measurer.measure(text, style, maxLines = 1).size.width
+                    val trailW = trailing?.let { measurer.measure(it, style, maxLines = 1).size.width + gap } ?: 0f
+                    val iconW = if (icon != null) with(density) { 20.dp.toPx() } + gap else 0f
+                    val room = constraints.maxWidth.toFloat()
+                    val showIcon = icon != null && labelW + trailW + iconW <= room
+                    val showTrailing = trailing != null && labelW + trailW <= room
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(Spacing.sm),
+                    ) {
+                        if (showIcon && icon != null) Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
+                        Text(text, style = style, color = content, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (showTrailing && trailing != null) {
+                            Text(trailing, style = style, color = content.copy(alpha = 0.72f), maxLines = 1)
+                        }
                     }
                 }
             }

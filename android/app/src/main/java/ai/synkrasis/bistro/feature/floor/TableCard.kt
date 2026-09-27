@@ -122,24 +122,18 @@ fun TableCard(
                 }
                 if (order != null) {
                     Column {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text("#${order.orderNumber}", style = BistroTheme.type.identifier, color = c.textSecondary)
-                            Text(" · ${order.guestCount} guests", style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 1)
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.sm)) {
-                            Icon(Icons.Rounded.Schedule, null, tint = c.textTertiary, modifier = Modifier.size(12.dp))
-                            Text(Format.elapsed(order.openedAt, now), style = BistroTheme.type.metadata, color = c.textTertiary,
-                                modifier = Modifier.weight(1f), maxLines = 1)
-                            Text(Format.money(order.subtotal, session.currency), style = BistroTheme.type.amountSmall, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Clip)
-                        }
-                        if (order.readyCount > 0 || order.pendingCount > 0) {
-                            Spacer(Modifier.height(Spacing.xs))
-                            androidx.compose.foundation.layout.FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(Spacing.xs),
-                                verticalArrangement = Arrangement.spacedBy(Spacing.xs),
-                            ) {
-                                if (order.readyCount > 0) MiniFlag("${order.readyCount} ready", Tone.Success)
-                                if (order.pendingCount > 0) MiniFlag("${order.pendingCount} unsent", Tone.Warning)
+                        Text(
+                            "#${order.orderNumber} · ${order.guestCount} guests · ${Format.elapsed(order.openedAt, now)}",
+                            style = BistroTheme.type.metadata, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                            Text(Format.money(order.subtotal, session.currency), style = BistroTheme.type.amountSmall, color = c.textPrimary,
+                                maxLines = 1, modifier = Modifier.weight(1f, fill = false))
+                            // One flag, the most urgent: food waiting beats items not yet sent.
+                            when {
+                                order.readyCount > 0 -> MiniFlag("${order.readyCount} ready", Tone.Success)
+                                order.pendingCount > 0 -> MiniFlag("${order.pendingCount} unsent", Tone.Warning)
                             }
                         }
                     }
@@ -162,7 +156,7 @@ fun TableCard(
 }
 
 /** Fixed so a row of the floor grid lines up, whatever each table is doing. */
-private val CARD_HEIGHT = 172.dp
+private val CARD_HEIGHT = 136.dp
 
 @Composable
 private fun MiniFlag(text: String, tone: Tone) {

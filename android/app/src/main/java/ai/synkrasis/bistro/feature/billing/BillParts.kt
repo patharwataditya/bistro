@@ -63,7 +63,9 @@ fun BillHero(bill: Bill, modifier: Modifier = Modifier) {
     }
     val description = buildString {
         append("$label ${Format.money(amount, cur)}. ${v.label}. ")
-        append("Total ${Format.money(bill.total, cur)}, paid ${Format.money(bill.netPaid, cur)}.")
+        append("Total ${Format.money(bill.total, cur)}, ")
+        append(if (bill.refundedTotal.signum() > 0) "net paid after refunds " else "paid ")
+        append("${Format.money(bill.netPaid, cur)}.")
     }
     Column(modifier.fillMaxWidth().padding(vertical = Spacing.sm).clearAndSetSemantics { contentDescription = description }) {
         Row(verticalAlignment = Alignment.CenterVertically) {

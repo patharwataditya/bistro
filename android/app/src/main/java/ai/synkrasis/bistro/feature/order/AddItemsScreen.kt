@@ -115,10 +115,12 @@ fun AddItemsScreen(orderId: Int) {
                     )
                     Gap(Spacing.sm)
                     val q = vm.query.trim().lowercase()
+                    // "All" reads like a printed menu: categories in menu order, items within each.
+                    val categoryOrder = remember(menu) { menu.categories.withIndex().associate { (i, cat) -> cat.id to i } }
                     val items = menu.items.filter { i ->
                         (vm.category == null || i.categoryId == vm.category) &&
                             (q.isEmpty() || i.name.lowercase().contains(q) || i.description?.lowercase()?.contains(q) == true)
-                    }
+                    }.sortedWith(compareBy({ categoryOrder[it.categoryId] ?: Int.MAX_VALUE }, { it.sortOrder }, { it.name }))
                     if (items.isEmpty()) {
                         EmptyState(
                             Icons.Rounded.SearchOff,

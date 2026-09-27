@@ -105,11 +105,11 @@ private fun TicketHeader(ticket: Ticket, now: () -> Instant, zone: ZoneId) {
                 ticket.tableName, style = BistroTheme.type.tableLabel, color = c.textPrimary, maxLines = 1,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.semantics { heading() },
             )
+            Text("Check #${ticket.orderNumber}", style = BistroTheme.type.identifier, color = c.textSecondary, maxLines = 1)
             Text(
-                "Check #${ticket.orderNumber} · Ticket ${ticket.ticketNumber}",
-                style = BistroTheme.type.identifier, color = c.textSecondary, maxLines = 1,
+                "Ticket ${ticket.ticketNumber} · ${ticket.serverName}", style = BistroTheme.type.metadata,
+                color = c.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Text(ticket.serverName, style = BistroTheme.type.metadata, color = c.textTertiary, maxLines = 1, overflow = TextOverflow.Ellipsis)
             OrderStatusFlag(ticket)
         }
         if (ticket.lane == Lane.Done) DoneStamp(ticket, zone) else TicketTimer(ticket, now)
@@ -122,7 +122,8 @@ private fun OrderStatusFlag(ticket: Ticket) {
     if (ticket.orderStatus == OrderStatus.Cancelled || ticket.orderStatus == OrderStatus.Closed) {
         val v = ticket.orderStatus.visual
         Gap(Spacing.xs)
-        StatusChip("Order ${v.label.lowercase()}", v.tone, icon = v.icon)
+        // Short enough to sit beside the timer: "Paid" (guests settled) or "Cancelled".
+        StatusChip(if (ticket.orderStatus == OrderStatus.Closed) "Paid" else v.label, v.tone, icon = v.icon)
     } else if (ticket.status == ai.synkrasis.bistro.domain.TicketStatus.Accepted) {
         val v = ticket.status.visual
         Gap(Spacing.xs)
@@ -144,7 +145,7 @@ private fun TicketTimer(ticket: Ticket, now: () -> Instant) {
     Column(
         horizontalAlignment = Alignment.End,
         modifier = Modifier.padding(start = Spacing.md).clearAndSetSemantics {
-            contentDescription = "${ticket.timerLabel()} $minutes minutes, ${urgency.label}"
+            contentDescription = "${ticket.timerLabel()} $minutes ${if (minutes == 1L) "minute" else "minutes"}, ${urgency.label}"
         },
     ) {
         Text(Format.clock(start, instant), style = BistroTheme.type.metric, color = color, maxLines = 1)

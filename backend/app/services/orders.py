@@ -42,6 +42,10 @@ FIRED = (OrderItemStatus.SENT, OrderItemStatus.PREPARING, OrderItemStatus.READY,
          OrderItemStatus.SERVED)
 
 
+def _items(n: int) -> str:
+    return f"{n} item" if n == 1 else f"{n} items"
+
+
 # ---------- loading ----------
 
 def get_order(db: Session, actor: Actor, order_id: int, *, lock: bool = False) -> Order:
@@ -368,7 +372,7 @@ def fire(db: Session, actor: Actor, order_id: int, version: int) -> Order:
         item.ticket_id = ticket.id
     bump(order)
     audit.record(db, actor, "order.fired", "order", order.id,
-                 f"Sent {sum(i.quantity for i in pending)} item(s) from #{order.order_number} "
+                 f"Sent {_items(sum(i.quantity for i in pending))} from #{order.order_number} "
                  f"to the kitchen", ticket_id=ticket.id)
     return order
 
@@ -525,7 +529,7 @@ def split(db: Session, actor: Actor, order_id: int, data: SplitIn) -> Order:
     db.flush()
     db.expire(order, ["items"])
     audit.record(db, actor, "order.split", "order", order.id,
-                 f"Split {len(items)} item(s) from #{order.order_number} to "
+                 f"Split {_items(len(items))} from #{order.order_number} to "
                  f"#{new_order.order_number} on {target_table.name}", new_order_id=new_order.id)
     return new_order
 

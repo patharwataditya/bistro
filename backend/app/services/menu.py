@@ -99,7 +99,8 @@ def delete_category(db: Session, actor: Actor, category_id: int) -> None:
     count = db.scalar(select(func.count()).where(MenuItem.category_id == category.id,
                                                  MenuItem.is_active)) or 0
     if count:
-        raise Conflict(f"{count} item(s) are in this category. Move or remove them first.")
+        raise Conflict(f"{count} {'item is' if count == 1 else 'items are'} in this category. "
+                       "Move or remove them first.")
     category.is_active = False
     audit.record(db, actor, "menu.category_deleted", "menu_category", category.id,
                  f"Removed category {category.name}")
