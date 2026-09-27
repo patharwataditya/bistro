@@ -33,13 +33,17 @@ class MainActivity : ComponentActivity() {
             val appearance by container.preferences.appearance.collectAsStateWithLifecycle()
             val hapticsOn by container.preferences.hapticsEnabled.collectAsStateWithLifecycle()
             val mode = appearance ?: Appearance.Default
-            LaunchedEffect(mode) {
-                val bars = if (mode.isDark) {
+            val session by container.session.state.collectAsStateWithLifecycle()
+            // The sign-in screen has a dark hero in every appearance: light status icons there.
+            val darkTop = mode.isDark || session is SessionState.SignedOut || session is SessionState.RestoreFailed
+            LaunchedEffect(mode, darkTop) {
+                val statusBars = if (darkTop) SystemBarStyle.dark(Color.TRANSPARENT) else SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
+                val navBars = if (mode.isDark) {
                     SystemBarStyle.dark(Color.TRANSPARENT)
                 } else {
                     SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT)
                 }
-                enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
+                enableEdgeToEdge(statusBarStyle = statusBars, navigationBarStyle = navBars)
             }
             BistroTheme(mode) {
                 val haptics = rememberViewHaptics { hapticsOn }
