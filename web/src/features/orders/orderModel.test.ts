@@ -3,8 +3,9 @@ import { P, type Permission } from '@/auth/permissions'
 import {
   abilities, addToCart, anythingFired, appendNote, canVoidItem, cartCount, cartFingerprint, cartPayload, cartQuantityOf,
   cartTotal, filterMenu, groupItems, lineKey, lineTotal, pendingUnits, pickCandidates, setCartLine, sortMenuItems,
-  splitProblem, splittableItems,
+  splitProblem, splittableItems, subtractCart, rebaseDrafts, firedUnits, shouldBlockLeave,
 } from './orderModel'
+import { newerOrder } from './orderCache'
 
 let seq = 0
 function item(status: string, over: Partial<OrderItem> = {}): OrderItem {
@@ -78,6 +79,11 @@ describe('abilities', () => {
     expect(a).toMatchObject({ move: true, changeGuests: true, merge: false, split: false, edit: false, cancel: false, viewBill: true })
     const closed = abilities(order([], { status: 'CLOSED' }), grants(P.ORDERS_UPDATE, P.ORDERS_TRANSFER))
     expect(closed).toMatchObject({ move: false, changeGuests: false })
+  })
+
+  it('needs tables.view to pick a table for move, merge or split', () => {
+    expect(abilities(order([]), grants(P.ORDERS_TRANSFER)).seeTables).toBe(false)
+    expect(abilities(order([]), grants(P.ORDERS_TRANSFER, P.TABLES_VIEW)).seeTables).toBe(true)
   })
 
   it('voids only sent lines, only with orders.cancel, only while open', () => {
@@ -157,5 +163,61 @@ describe('menu', () => {
   it('appends quick notes', () => {
     expect(appendNote('', 'Mild')).toBe('Mild')
     expect(appendNote('No onions', 'Mild')).toBe('No onions, Mild')
+  })
+})
+
+describe('after an add', () => {
+  const dish = (id: number) => ({ id, name: `Dish ${id}`, price: '10.00', is_available: true })
+
+  it('takes off only what was submitted, keeping taps made while it was in flight', () => {
+    const submitted = addToCart(addToCart([], dish(1), 2), dish(2), 1)
+    // While the request was in flight: one more of dish 1, a new dish 3, and dish 2 with a note.
+    let now = addToCart(submitted, dish(1), 1)
+    now = addToCart(now, dish(3), 2)
+    now = addToCart(now, dish(2), 1, 'No ice')
+    const left = subtractCart(now, submitted)
+    expect(left.map((l) => [l.menuItemId, l.quantity, l.note])).toEqual([[1, 1, ''], [3, 2, ''], [2, 1, 'No ice']])
+    expect(subtractCart(submitted, submitted)).toEqual([])
+    // Lowered below what was sent while in flight: the line just goes.
+    expect(subtractCart(setCartLine(submitted, lineKey(1, ''), 1), submitted).some((l) => l.menuItemId === 1)).toBe(false)
+  })
+
+  it('moves a typed quantity by what the server merged into that line', () => {
+    const a = item('PENDING', { quantity: 2 })
+    const b = item('PENDING', { quantity: 1 })
+    const before = order([a, b], { version: 4 })
+    const after = order([{ ...a, quantity: 3 }, { ...b, status: 'SENT' }], { version: 5 })
+    const next = rebaseDrafts(new Map([[a.id, 5], [b.id, 4]]), before, after)
+    expect(next.get(a.id)).toBe(6)
+    expect(next.has(b.id)).toBe(false)
+  })
+
+  it('counts what a send actually fired', () => {
+    const before = order([item('PENDING', { quantity: 3 }), item('PENDING', { quantity: 1 }), item('SENT', { quantity: 2 })])
+    const after = order(before.items.map((i) => ({ ...i, status: 'SENT' })))
+    expect(firedUnits(before, after)).toBe(4)
+  })
+})
+
+describe('late answers', () => {
+  it('keeps the newer check', () => {
+    const cached = order([], { version: 7 })
+    expect(newerOrder(cached, order([], { version: 6 }))).toBe(cached)
+    const incoming = order([], { version: 8 })
+    expect(newerOrder(cached, incoming)).toBe(incoming)
+    expect(newerOrder(undefined, incoming)).toBe(incoming)
+  })
+})
+
+describe('leaving with new items', () => {
+  const base = { cartUnits: 2, editable: true, leaving: false, samePath: false }
+  it('asks only while the items could still be added', () => {
+    expect(shouldBlockLeave(base)).toBe(true)
+    expect(shouldBlockLeave({ ...base, cartUnits: 0 })).toBe(false)
+    // Cancelled, split away, merged: the check can't take them any more.
+    expect(shouldBlockLeave({ ...base, editable: false })).toBe(false)
+    // The screen navigates itself after a successful action.
+    expect(shouldBlockLeave({ ...base, leaving: true })).toBe(false)
+    expect(shouldBlockLeave({ ...base, samePath: true })).toBe(false)
   })
 })

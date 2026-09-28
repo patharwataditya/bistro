@@ -34,6 +34,28 @@ export function pendingUnits(items: readonly OrderItem[], drafts: ReadonlyMap<nu
   return items.filter((i) => i.status === 'PENDING').reduce((n, i) => n + (drafts.get(i.id) ?? i.quantity), 0)
 }
 
+/**
+ * Lines were added and the server may have merged them into existing unsent lines
+ * (same item and note). A typed-but-unsaved quantity is absolute, so it would undo that
+ * merge: move each draft by however much its line grew. Drafts for lines that are no
+ * longer unsent are dropped.
+ */
+export function rebaseDrafts(drafts: ReadonlyMap<number, number>, before: Order | undefined, after: Order): Map<number, number> {
+  const next = new Map<number, number>()
+  for (const [id, q] of drafts) {
+    const now = after.items.find((i) => i.id === id)
+    if (!now || now.status !== 'PENDING') continue
+    const was = before?.items.find((i) => i.id === id)?.quantity ?? now.quantity
+    next.set(id, Math.max(1, Math.min(MAX_QTY, q + (now.quantity - was))))
+  }
+  return next
+}
+
+/** What a send to the kitchen actually sent: the unsent units it cleared. */
+export function firedUnits(before: Order | undefined, after: Order): number {
+  return Math.max(0, pendingUnits(before?.items ?? []) - pendingUnits(after.items))
+}
+
 export function hasLiveItems(items: readonly OrderItem[]): boolean {
   return items.some((i) => i.status !== 'VOIDED')
 }
@@ -62,6 +84,8 @@ export interface OrderAbilities {
   merge: boolean
   split: boolean
   cancel: boolean
+  /** Move, merge and split pick a table from the floor, which needs tables.view. */
+  seeTables: boolean
 }
 
 export function abilities(order: Order, can: (p: Permission) => boolean): OrderAbilities {
@@ -81,6 +105,7 @@ export function abilities(order: Order, can: (p: Permission) => boolean): OrderA
     merge: open && transfer,
     split: open && transfer,
     cancel: open && update && (!anythingFired(order.items) || can(P.ORDERS_CANCEL)),
+    seeTables: can(P.TABLES_VIEW),
   }
 }
 
@@ -154,6 +179,26 @@ export function addToCart(cart: readonly CartLine[], item: Pick<MenuItem, 'id' |
 export function setCartLine(cart: readonly CartLine[], key: string, quantity: number): CartLine[] {
   if (quantity <= 0) return cart.filter((l) => lineKey(l.menuItemId, l.note) !== key)
   return cart.map((l) => (lineKey(l.menuItemId, l.note) === key ? { ...l, quantity: Math.min(MAX_QTY, quantity) } : l))
+}
+
+/**
+ * After an add succeeded, take off exactly what was submitted: anything tapped while the
+ * request was in flight stays in the cart.
+ */
+export function subtractCart(cart: readonly CartLine[], submitted: readonly CartLine[]): CartLine[] {
+  const sent = new Map(submitted.map((l) => [lineKey(l.menuItemId, l.note), l.quantity]))
+  return cart
+    .map((l) => ({ ...l, quantity: l.quantity - (sent.get(lineKey(l.menuItemId, l.note)) ?? 0) }))
+    .filter((l) => l.quantity > 0)
+}
+
+/**
+ * Leaving the order screen with new items asks first — but only while they could still be
+ * added: never once the check is closed, cancelled, split away or merged, and never on a
+ * navigation the screen itself started after a successful action.
+ */
+export function shouldBlockLeave(o: { cartUnits: number; editable: boolean; leaving: boolean; samePath: boolean }): boolean {
+  return o.cartUnits > 0 && o.editable && !o.leaving && !o.samePath
 }
 
 export function cartCount(cart: readonly CartLine[]): number {

@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useBlocker, useNavigate, useParams } from 'react-router'
 import { ApiError } from '@/api/errors'
 import { keys, useMenu, useOrder } from '@/api/queries'
@@ -16,8 +16,11 @@ import { useToast } from '@/ui/Toast'
 import { orderApi } from './api'
 import { MenuBrowser, MenuSkeleton } from './MenuBrowser'
 import { OrderPanel, type CartControls } from './OrderPanel'
+import type { ActionContext } from './OrderActions'
+import { putOrder } from './orderCache'
 import {
-  abilities, addToCart, cartCount, cartFingerprint, cartQuantityOf, setCartLine, type CartLine,
+  abilities, addToCart, cartCount, cartFingerprint, cartQuantityOf, firedUnits, setCartLine, shouldBlockLeave, subtractCart,
+  type CartLine,
 } from './orderModel'
 import { asApiError, useOrderMutation } from './useOrderMutation'
 import { useQuantityDrafts } from './useQuantityDrafts'
@@ -50,7 +53,8 @@ function OrderScreen({ orderId }: { orderId: number }) {
   const showMenu = !!a?.edit && can(P.MENU_VIEW)
   const menu = useMenu()
 
-  const { drafts, set: setQuantity, flush } = useQuantityDrafts(orderId)
+  const quantities = useQuantityDrafts(orderId)
+  const { flush } = quantities
 
   // ----- Local cart: never touched by polling.
   const [cart, setCart] = useState<CartLine[]>([])
@@ -59,6 +63,8 @@ function OrderScreen({ orderId }: { orderId: number }) {
   const [fireIntent] = useState(() => new IntentKey())
   const [billIntent] = useState(() => new IntentKey())
 
+  /** Set just before this screen navigates away after a successful action. */
+  const leaving = useRef(false)
   const latest = useCallback((): Order | undefined => qc.getQueryData<Order>(keys.order(orderId)), [qc, orderId])
 
   const onAdd = (item: MenuItem, quantity: number, note: string) => {
@@ -66,23 +72,26 @@ function OrderScreen({ orderId }: { orderId: number }) {
     setCart((c) => addToCart(c, item, quantity, note))
   }
 
-  const submit = useOrderMutation(orderId, async (send: boolean) => {
-    const lines = cart
-    const added = await orderApi.addItems(orderId, lines, addIntent.keyFor(cartFingerprint(orderId, lines)))
-    qc.setQueryData(keys.order(orderId), added)
-    if (!send) return { order: added, count: cartCount(lines), sendError: null as ApiError | null }
+  const submit = useOrderMutation(orderId, async ({ send, lines }: { send: boolean; lines: CartLine[] }) => {
+    // Quantities typed on existing lines go first: the server may merge these new lines
+    // into those very lines, and a later absolute quantity would undo the merge.
+    await flush()
+    const before = latest()
+    const added = putOrder(qc, await orderApi.addItems(orderId, lines, addIntent.keyFor(cartFingerprint(orderId, lines))))
+    quantities.rebase(before, added)
+    if (!send) return { order: added, sent: 0, sendError: null as ApiError | null }
     try {
-      const flushed = await flush()
-      const base = flushed ?? added
-      const fired = await orderApi.fire(orderId, base.version, addFireIntent.keyFor(`fire:${orderId}:${base.version}`))
-      return { order: fired, count: cartCount(lines), sendError: null }
+      const current = (await flush()) ?? latest() ?? added
+      const fired = await orderApi.fire(orderId, current.version, addFireIntent.keyFor(`fire:${orderId}:${current.version}`))
+      return { order: fired, sent: firedUnits(current, fired), sendError: null }
     } catch (e) {
-      return { order: latest() ?? added, count: cartCount(lines), sendError: asApiError(e) }
+      return { order: latest() ?? added, sent: 0, sendError: asApiError(e) }
     }
   }, {
-    onSuccess: (r, send) => {
-      qc.setQueryData(keys.order(orderId), r.order)
-      setCart([])
+    onSuccess: (r, { send, lines }) => {
+      putOrder(qc, r.order)
+      // Only what was submitted comes off: taps made while it was in flight stay.
+      setCart((c) => subtractCart(c, lines))
       addIntent.reset()
       addFireIntent.reset()
       if (r.sendError) {
@@ -90,11 +99,15 @@ function OrderScreen({ orderId }: { orderId: number }) {
         toast.error(`Added, but not sent: ${r.sendError.message}`)
         void qc.invalidateQueries({ queryKey: keys.order(orderId) })
       } else if (send) {
-        toast.success(`Sent ${r.count} item${r.count === 1 ? '' : 's'} to the kitchen`)
+        toast.success(`Sent ${r.sent} item${r.sent === 1 ? '' : 's'} to the kitchen`)
       } else {
         toast.success('Added to the check')
       }
       if (!wide) setPane('check')
+    },
+    onError: (err) => {
+      // e.g. "Sold out: …" — show the menu as it is now.
+      if (err.kind === 'validation') void qc.invalidateQueries({ queryKey: keys.menu })
     },
   })
 
@@ -102,34 +115,59 @@ function OrderScreen({ orderId }: { orderId: number }) {
     // The kitchen must get what the screen shows, including clicks from the last 400 ms.
     const current = (await flush()) ?? latest()
     if (!current) throw new ApiError('unexpected', 'The check isn’t loaded yet. Try again.')
-    return orderApi.fire(orderId, current.version, fireIntent.keyFor(`fire:${orderId}:${current.version}`))
-  }, { success: 'Sent to the kitchen', onSuccess: () => fireIntent.reset() })
+    const fired = await orderApi.fire(orderId, current.version, fireIntent.keyFor(`fire:${orderId}:${current.version}`))
+    return { order: fired, sent: firedUnits(current, fired) }
+  }, {
+    success: (r) => `Sent ${r.sent} item${r.sent === 1 ? '' : 's'} to the kitchen`,
+    onSuccess: (r) => {
+      putOrder(qc, r.order)
+      fireIntent.reset()
+    },
+  })
 
   const bill = useOrderMutation(orderId, async () => {
-    const current = latest()
+    const current = (await flush()) ?? latest()
     if (!current) throw new ApiError('unexpected', 'The check isn’t loaded yet. Try again.')
     return orderApi.createBill(orderId, current.version, billIntent.keyFor(`bill:${orderId}:${current.version}`))
   }, {
     onSuccess: (b) => {
       billIntent.reset()
       void qc.invalidateQueries({ queryKey: keys.order(orderId) })
+      leaving.current = true
       navigate(`/bills/${b.id}`)
     },
   })
 
   // ----- Don't lose unsent new items by leaving.
   const count = cartCount(cart)
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => count > 0 && currentLocation.pathname !== nextLocation.pathname)
+  const canEdit = !!a?.edit
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => shouldBlockLeave({
+    cartUnits: count,
+    // The cache, not this render: an action may have closed the check a moment ago.
+    editable: canEdit && latest()?.status === 'OPEN',
+    leaving: leaving.current,
+    samePath: currentLocation.pathname === nextLocation.pathname,
+  }))
   useEffect(() => {
-    if (count === 0) return
+    if (count === 0 || !canEdit) return
     const onUnload = (e: BeforeUnloadEvent) => e.preventDefault()
     window.addEventListener('beforeunload', onUnload)
     return () => window.removeEventListener('beforeunload', onUnload)
-  }, [count])
+  }, [count, canEdit])
 
   if (query.isPending) return <OrderSkeleton />
   if (!order || !a) {
     return <ErrorState error={query.error ?? new ApiError('unexpected', 'Couldn’t load this check.')} onRetry={() => void query.refetch()} className="py-24" />
+  }
+
+  const actions: ActionContext = {
+    flush,
+    cartUnits: count,
+    discardCart: () => setCart([]),
+    leave: () => {
+      leaving.current = true
+      setCart([])
+    },
   }
 
   const cartControls: CartControls | null = showMenu
@@ -137,8 +175,8 @@ function OrderScreen({ orderId }: { orderId: number }) {
       lines: cart,
       setLine: (key, q) => setCart((c) => setCartLine(c, key, q)),
       clear: () => setCart([]),
-      submit: (send) => submit.mutate(send),
-      submitting: submit.isPending ? (submit.variables ? 'send' : 'add') : null,
+      submit: (send) => submit.mutate({ send, lines: cart }),
+      submitting: submit.isPending ? (submit.variables?.send ? 'send' : 'add') : null,
     }
     : null
 
@@ -148,8 +186,8 @@ function OrderScreen({ orderId }: { orderId: number }) {
       can={a}
       now={now}
       staleError={query.isError ? query.error : null}
-      drafts={drafts}
-      onQuantity={setQuantity}
+      quantities={quantities}
+      actions={actions}
       cart={cartControls}
       onFire={() => fire.mutate(undefined)}
       firing={fire.isPending}

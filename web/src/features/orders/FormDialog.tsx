@@ -41,6 +41,8 @@ export function FormDialog({
               forceMount
               onEscapeKeyDown={(e) => loading && e.preventDefault()}
               onPointerDownOutside={(e) => loading && e.preventDefault()}
+              // Without a description there is nothing to point at (rather than repeating the title).
+              {...(description ? {} : { 'aria-describedby': undefined })}
             >
               <motion.div
                 initial={{ opacity: 0, scale: 0.96, y: 8 }}
@@ -51,11 +53,7 @@ export function FormDialog({
               >
                 <form onSubmit={submit}>
                   <RDialog.Title className="t-section text-fg">{title}</RDialog.Title>
-                  {description ? (
-                    <RDialog.Description className="t-support mt-1 text-fg2">{description}</RDialog.Description>
-                  ) : (
-                    <RDialog.Description className="sr-only">{title}</RDialog.Description>
-                  )}
+                  {description && <RDialog.Description className="t-support mt-1 text-fg2">{description}</RDialog.Description>}
                   <div className="mt-5 flex flex-col gap-4">{children}</div>
                   <div className="mt-6 flex items-center gap-2">
                     <div className="mr-auto">{secondary}</div>

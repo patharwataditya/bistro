@@ -31,8 +31,10 @@ export function MenuBrowser({ menu, currency, quantityOf, onAdd, className }: {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null
       if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
-      if (document.querySelector('[role="dialog"],[role="alertdialog"]')) return
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
+      // Not while a dialog or a menu is open: "/" there belongs to it (e.g. typeahead).
+      if (t?.closest('[role="menu"],[role="menubar"],[role="listbox"]')) return
+      if (document.querySelector('[role="dialog"],[role="alertdialog"],[role="menu"]')) return
       e.preventDefault()
       search.current?.focus()
     }

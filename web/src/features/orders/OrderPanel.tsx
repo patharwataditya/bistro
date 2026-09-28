@@ -16,12 +16,13 @@ import type { ApiError } from '@/api/errors'
 import { orderApi } from './api'
 import { FormDialog, QuickNotes } from './FormDialog'
 import { FiredItemRow, PendingItemRow } from './ItemRows'
-import { OrderActions } from './OrderActions'
+import { OrderActions, type ActionContext } from './OrderActions'
 import {
   appendNote, canVoidItem, cartCount, cartTotal, groupItems, hasLiveItems, lineKey, lineTotal, MAX_QTY, pendingUnits,
   QUICK_NOTES, type CartLine, type OrderAbilities,
 } from './orderModel'
 import { useOrderMutation } from './useOrderMutation'
+import type { QuantityDrafts } from './useQuantityDrafts'
 
 export interface CartControls {
   lines: CartLine[]
@@ -35,13 +36,13 @@ export interface CartControls {
  * The check: header, new (unsent-to-server) items, the server's items by section, totals,
  * and a pinned footer with the one next step (send, bill, or payment).
  */
-export function OrderPanel({ order, can: a, now, staleError, drafts, onQuantity, cart, onFire, firing, onBill, billing, className }: {
+export function OrderPanel({ order, can: a, now, staleError, quantities, actions, cart, onFire, firing, onBill, billing, className }: {
   order: Order
   can: OrderAbilities
   now: number
   staleError: ApiError | null
-  drafts: ReadonlyMap<number, number>
-  onQuantity: (itemId: number, q: number) => void
+  quantities: QuantityDrafts
+  actions: ActionContext
   cart: CartControls | null
   onFire: () => void
   firing: boolean
@@ -50,6 +51,7 @@ export function OrderPanel({ order, can: a, now, staleError, drafts, onQuantity,
   className?: string
 }) {
   const navigate = useNavigate()
+  const { drafts } = quantities
   const currency = order.currency_code
   const v = orderVisual(order.status)
   const sections = groupItems(order.items, drafts)
@@ -71,7 +73,11 @@ export function OrderPanel({ order, can: a, now, staleError, drafts, onQuantity,
       setReason('')
     },
   })
-  const remove = useOrderMutation(order.id, (item: OrderItem) => orderApi.removeItem(order.id, item.id), {
+  const remove = useOrderMutation(order.id, async (item: OrderItem) => {
+    // A quantity still waiting (or in flight) for this line would land after the delete.
+    await quantities.cancel(item.id)
+    return orderApi.removeItem(order.id, item.id)
+  }, {
     success: (_, item) => `${item.name} removed`,
     onSuccess: () => setNoteFor(null),
   })
@@ -87,12 +93,12 @@ export function OrderPanel({ order, can: a, now, staleError, drafts, onQuantity,
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <p className="t-status text-fg3">Check #{order.order_number}</p>
-            <h1 className="t-page-title truncate text-fg">Table {order.table_name}</h1>
+            <h1 className={cn('break-words text-fg', order.table_name.length > 12 ? 't-section' : 't-page-title')}>Table {order.table_name}</h1>
             <p className="t-support mt-0.5 truncate text-fg2">
               {order.guest_count} {order.guest_count === 1 ? 'guest' : 'guests'} · {order.server_name} · {elapsed(order.opened_at, now)}
             </p>
           </div>
-          <OrderActions order={order} can={a} />
+          <OrderActions order={order} can={a} ctx={actions} />
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <StatusChip label={v.label} tone={v.tone} icon={v.icon} />
@@ -135,7 +141,9 @@ export function OrderPanel({ order, can: a, now, staleError, drafts, onQuantity,
                       currency={currency}
                       editable={a.edit}
                       busy={itemBusy(item.id)}
-                      onQuantity={(q) => onQuantity(item.id, q)}
+                      unsaved={quantities.failed.has(item.id)}
+                      onRetry={() => quantities.retry(item.id)}
+                      onQuantity={(q) => quantities.set(item.id, q)}
                       onNote={() => setNoteFor(item)}
                       onRemove={() => remove.mutate(item)}
                     />

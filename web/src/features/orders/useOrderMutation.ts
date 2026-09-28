@@ -3,6 +3,7 @@ import { ApiError } from '@/api/errors'
 import { keys } from '@/api/queries'
 import type { Order } from '@/api/types'
 import { useToast } from '@/ui/Toast'
+import { putOrder } from './orderCache'
 
 function isOrder(v: unknown): v is Order {
   return typeof v === 'object' && v !== null && 'order_number' in v && 'items' in v && 'totals' in v
@@ -16,12 +17,15 @@ interface Options<V, T> {
   success?: string | ((result: T, vars: V) => string | null) | null
   onSuccess?: (result: T, vars: V) => void
   onError?: (error: ApiError, vars: V) => void
+  /** Toast the error (default). Dialogs that explain it inline return false. */
+  toastError?: (error: ApiError) => boolean
 }
 
 /**
  * useAction for the order screen, plus Android's "generation" guard: any poll in flight is
- * cancelled before the action runs, and the order the server returns replaces the cache —
- * so a slow poll can never paint an older check over the result of what was just done.
+ * cancelled before the action runs, and the order the server returns replaces the cache
+ * unless the cache already holds a newer version — so neither a slow poll nor a late
+ * answer can paint an older check over the result of what was just done.
  */
 export function useOrderMutation<V, T>(orderId: number, fn: (vars: V) => Promise<T>, opts: Options<V, T> = {}) {
   const qc = useQueryClient()
@@ -37,7 +41,7 @@ export function useOrderMutation<V, T>(orderId: number, fn: (vars: V) => Promise
       return fn(vars)
     },
     onSuccess: (result, vars) => {
-      if (isOrder(result) && result.id === orderId) qc.setQueryData(orderKey, result)
+      if (isOrder(result) && result.id === orderId) putOrder(qc, result)
       else void qc.invalidateQueries({ queryKey: orderKey })
       refreshAll()
       const msg = typeof opts.success === 'function' ? opts.success(result, vars) : opts.success
@@ -51,7 +55,7 @@ export function useOrderMutation<V, T>(orderId: number, fn: (vars: V) => Promise
         void qc.invalidateQueries({ queryKey: orderKey })
         refreshAll()
       }
-      if (err.kind !== 'session-ended') toast.error(err.message)
+      if (err.kind !== 'session-ended' && (opts.toastError?.(err) ?? true)) toast.error(err.message)
       opts.onError?.(err, vars)
     },
   })

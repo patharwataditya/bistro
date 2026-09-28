@@ -13,12 +13,15 @@ function Note({ text }: { text: string }) {
 }
 
 /** A line not yet sent: quantity, note and remove are still editable. */
-export function PendingItemRow({ item, quantity, currency, editable, busy, onQuantity, onNote, onRemove }: {
+export function PendingItemRow({ item, quantity, currency, editable, busy, unsaved = false, onRetry, onQuantity, onNote, onRemove }: {
   item: OrderItem
   quantity: number
   currency: string
   editable: boolean
   busy: boolean
+  /** The quantity shown couldn't be saved yet (it is retried). */
+  unsaved?: boolean
+  onRetry?: () => void
   onQuantity: (q: number) => void
   onNote: () => void
   onRemove: () => void
@@ -35,6 +38,12 @@ export function PendingItemRow({ item, quantity, currency, editable, busy, onQua
         </div>
         <span className="t-amount shrink-0 text-fg">{money(item.line_total, currency)}</span>
       </div>
+      {unsaved && (
+        <p role="status" className="t-meta flex flex-wrap items-center gap-x-2 text-warning">
+          <span>{quantity} not saved yet — retrying</span>
+          {onRetry && <button type="button" onClick={onRetry} className="t-meta min-h-10 font-semibold underline underline-offset-2">Retry now</button>}
+        </p>
+      )}
       {editable && (
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="sm" icon={NotebookPen} onClick={onNote} disabled={busy} className="-ml-2 text-fg2">

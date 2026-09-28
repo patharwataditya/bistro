@@ -4,7 +4,7 @@
  * Mutations are never retried automatically: a retry is always an explicit user action that
  * reuses the same idempotency key.
  */
-import { keepPreviousData, QueryClient, useQuery, type QueryKey, type UseQueryOptions } from '@tanstack/react-query'
+import { keepPreviousData, QueryClient, useQuery, useQueryClient, type QueryKey, type UseQueryOptions } from '@tanstack/react-query'
 import { request } from './client'
 import { ApiError } from './errors'
 import type {
@@ -56,7 +56,23 @@ function useApi<T>(key: QueryKey, path: string, query?: Record<string, string | 
 
 export const useFloor = (poll = 5_000) => useApi<Floor>(keys.floor, '/tables', undefined, { refetchInterval: poll })
 export const useMenu = () => useApi<Menu>(keys.menu, '/menu', undefined, { staleTime: 30_000 })
-export const useOrder = (id: number) => useApi<Order>(keys.order(id), `/orders/${id}`, undefined, { refetchInterval: 8_000 })
+/**
+ * A poll that started before a save and answers after it must not paint the older check
+ * over the newer one the save put in the cache. Equal versions still win: kitchen progress
+ * changes item states without bumping the order version.
+ */
+export function useOrder(id: number) {
+  const qc = useQueryClient()
+  return useQuery<Order, ApiError, Order, QueryKey>({
+    queryKey: keys.order(id),
+    queryFn: async ({ signal }) => {
+      const fresh = await request<Order>(`/orders/${id}`, { signal })
+      const cached = qc.getQueryData<Order>(keys.order(id))
+      return cached && cached.id === fresh.id && cached.version > fresh.version ? cached : fresh
+    },
+    refetchInterval: 8_000,
+  })
+}
 export const useKitchen = () => useApi<KitchenBoard>(keys.kitchen, '/kitchen/tickets', { include_recent: true }, { refetchInterval: 4_000 })
 export const useBill = (id: number, live: boolean) => useApi<Bill>(keys.bill(id), `/bills/${id}`, undefined, { refetchInterval: live ? 10_000 : 60_000 })
 export const usePaymentMethods = (enabled = true) => useApi<PaymentMethod[]>(keys.paymentMethods, '/payment-methods', undefined, { staleTime: 60_000, enabled })

@@ -1,8 +1,9 @@
 import { Check, Users } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { keys } from '@/api/queries'
-import type { DiningTable } from '@/api/types'
+import type { DiningTable, Floor } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
 import { useAction } from '@/features/common/useAction'
@@ -15,6 +16,7 @@ import { Stepper } from '@/ui/Controls'
 import { TextField } from '@/ui/Field'
 import { Divider, Drawer } from '@/ui/Overlay'
 import { orderVisual, tableVisual } from '@/ui/status'
+import { useToast } from '@/ui/Toast'
 import { TONE } from '@/ui/tone'
 import { floorApi } from './api'
 import {
@@ -185,17 +187,35 @@ function StatusEditor({ table, onClose, onBusy, compact }: {
   compact: boolean
 }) {
   const groupId = useId()
+  const qc = useQueryClient()
+  const toast = useToast()
   const [choice, setChoice] = useState<ManualStatus | null>(() => (isManualStatus(table.status) ? table.status : null))
   const [note, setNote] = useState(table.status_note ?? '')
+  // The table as it was when this editor opened: a change made meanwhile on another device
+  // must come back as a conflict, not be silently overwritten by the next poll's version.
+  const [version, setVersion] = useState(table.version)
+  const [stale, setStale] = useState(false)
   const save = useAction(
-    (v: { status: ManualStatus; note: string | null }) => floorApi.setStatus(table, v.status, v.note),
+    (v: { status: ManualStatus; note: string | null }) => floorApi.setStatus(table.id, version, v.status, v.note),
     {
       invalidate: [keys.floor],
       success: (t) => `${t.name} marked ${tableVisual(t.status).label.toLowerCase()}`,
       onSuccess: () => onClose(),
+      toastError: false,
+      onError: (err) => {
+        if (err.kind !== 'stale') {
+          if (err.kind !== 'session-ended') toast.error(err.message)
+          return
+        }
+        setStale(true)
+        void qc.refetchQueries({ queryKey: keys.floor }).then(() => {
+          const fresh = qc.getQueryData<Floor>(keys.floor)?.tables.find((t) => t.id === table.id)
+          if (fresh) setVersion(fresh.version)
+        })
+      },
     },
   )
-  const changed = choice !== null && (choice !== table.status || note !== (table.status_note ?? ''))
+  const changed = choice !== null && (stale || choice !== table.status || note !== (table.status_note ?? ''))
   const submit = () => {
     if (!choice) return
     onBusy(true)
@@ -205,6 +225,11 @@ function StatusEditor({ table, onClose, onBusy, compact }: {
   return (
     <section aria-labelledby={`${groupId}-h`} className="flex flex-col gap-3">
       <h3 id={`${groupId}-h`} className="t-card-title text-fg">Table status</h3>
+      {stale && (
+        <p role="alert" className="t-support rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-fg">
+          Someone else changed this table while you were here — it's now {tableVisual(table.status).label.toLowerCase()}. Check your choice and save again.
+        </p>
+      )}
       <div role="radiogroup" aria-labelledby={`${groupId}-h`} className="flex flex-col gap-2">
         {MANUAL_STATUSES.map((s) => {
           const v = tableVisual(s)

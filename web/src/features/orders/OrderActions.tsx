@@ -2,6 +2,7 @@ import { ArrowLeftRight, CircleX, EllipsisVertical, GitMerge, LayoutGrid, Loader
 import { DropdownMenu } from 'radix-ui'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { ApiError } from '@/api/errors'
 import type { DiningTable, Order } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
@@ -14,18 +15,34 @@ import { ConfirmDialog, Drawer } from '@/ui/Overlay'
 import { EmptyState, ErrorState, Skeleton } from '@/ui/States'
 import { tableVisual } from '@/ui/status'
 import { orderApi, usePickerFloor } from './api'
+import { STALE_NOTICE, useOpenVersion } from './dialogVersion'
 import { FormDialog } from './FormDialog'
 import { pickCandidates, splitProblem, splittableItems, type OrderAbilities, type TablePick } from './orderModel'
 import { useOrderMutation } from './useOrderMutation'
 
-type Dialog = null | 'guests' | 'cancel' | TablePick
+type Dialog = null | 'guests' | 'cancel' | 'split-cart' | TablePick
+
+/** What the actions need from the screen around them. */
+export interface ActionContext {
+  /** Save quantities still being typed; version-bearing actions start from the result. */
+  flush: () => Promise<Order | null>
+  /** New items not yet on the check. */
+  cartUnits: number
+  discardCart: () => void
+  /** Called just before an action navigates away on success (the cart is moot then). */
+  leave: () => void
+}
+
+const NO_TABLES = "Needs the floor (tables.view) — ask a manager"
 
 /** The "⋯" order actions (Android's "Check #n" sheet) and the flows they open. */
-export function OrderActions({ order, can: a }: { order: Order; can: OrderAbilities }) {
+export function OrderActions({ order, can: a, ctx }: { order: Order; can: OrderAbilities; ctx: ActionContext }) {
   const [dialog, setDialog] = useState<Dialog>(null)
   const any = a.changeGuests || a.move || a.merge || a.split || a.cancel
   if (!any) return null
   const close = () => setDialog(null)
+  // Splitting opens the new check; new items would be lost on the way, so ask first.
+  const openSplit = () => setDialog(ctx.cartUnits > 0 ? 'split-cart' : 'split')
   return (
     <>
       <DropdownMenu.Root>
@@ -44,9 +61,9 @@ export function OrderActions({ order, can: a }: { order: Order; can: OrderAbilit
           >
             <DropdownMenu.Label className="t-status px-3 pt-1.5 pb-2 text-fg3">Check #{order.order_number}</DropdownMenu.Label>
             {a.changeGuests && <MenuRow icon={Users} title="Change guests" subtitle={`${order.guest_count} now`} onSelect={() => setDialog('guests')} />}
-            {a.move && <MenuRow icon={ArrowLeftRight} title="Move to another table" subtitle="Guests changed tables" onSelect={() => setDialog('move')} />}
-            {a.merge && <MenuRow icon={GitMerge} title="Merge a table into this one" subtitle="Combine two checks" onSelect={() => setDialog('merge')} />}
-            {a.split && <MenuRow icon={Split} title="Split items to a new table" subtitle="Part of the party moved" onSelect={() => setDialog('split')} />}
+            {a.move && <MenuRow icon={ArrowLeftRight} title="Move to another table" subtitle={a.seeTables ? 'Guests changed tables' : NO_TABLES} disabled={!a.seeTables} onSelect={() => setDialog('move')} />}
+            {a.merge && <MenuRow icon={GitMerge} title="Merge a table into this one" subtitle={a.seeTables ? 'Combine two checks' : NO_TABLES} disabled={!a.seeTables} onSelect={() => setDialog('merge')} />}
+            {a.split && <MenuRow icon={Split} title="Split items to a new table" subtitle={a.seeTables ? 'Part of the party moved' : NO_TABLES} disabled={!a.seeTables} onSelect={openSplit} />}
             {a.cancel && (
               <>
                 <DropdownMenu.Separator className="my-1 h-px bg-line" />
@@ -57,18 +74,38 @@ export function OrderActions({ order, can: a }: { order: Order; can: OrderAbilit
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
 
-      <GuestsDialog order={order} open={dialog === 'guests'} onClose={close} />
-      <CancelDialog order={order} open={dialog === 'cancel'} onClose={close} />
-      <TablePicker order={order} pick={dialog === 'move' || dialog === 'merge' || dialog === 'split' ? dialog : null} onClose={close} />
+      <GuestsDialog order={order} open={dialog === 'guests'} onClose={close} flush={ctx.flush} />
+      <CancelDialog order={order} open={dialog === 'cancel'} onClose={close} ctx={ctx} />
+      <TablePicker order={order} pick={dialog === 'move' || dialog === 'merge' || dialog === 'split' ? dialog : null} onClose={close} ctx={ctx} />
+      <ConfirmDialog
+        open={dialog === 'split-cart'}
+        onOpenChange={(o) => !o && close()}
+        title={`Discard ${ctx.cartUnits} new item${ctx.cartUnits === 1 ? '' : 's'} first?`}
+        message="They aren't on the check yet, and splitting opens the new check. Add them to this check first, or discard them to go on."
+        confirmLabel="Discard and split"
+        destructive
+        onConfirm={() => {
+          ctx.discardCart()
+          setDialog('split')
+        }}
+      />
     </>
   )
 }
 
-function MenuRow({ icon: Icon, title, subtitle, danger, onSelect }: { icon: LucideIcon; title: string; subtitle: string; danger?: boolean; onSelect: () => void }) {
+function MenuRow({ icon: Icon, title, subtitle, danger, disabled, onSelect }: {
+  icon: LucideIcon
+  title: string
+  subtitle: string
+  danger?: boolean
+  disabled?: boolean
+  onSelect: () => void
+}) {
   return (
     <DropdownMenu.Item
       onSelect={onSelect}
-      className="flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-2 py-2 outline-none data-[highlighted]:bg-[var(--hover-overlay)]"
+      disabled={disabled}
+      className="flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-2 py-2 outline-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60 data-[highlighted]:bg-[var(--hover-overlay)]"
     >
       <span className={cn('flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)]', danger ? 'bg-danger-soft text-danger' : 'bg-sunken text-fg')}>
         <Icon aria-hidden className="size-[18px]" />
@@ -81,14 +118,23 @@ function MenuRow({ icon: Icon, title, subtitle, danger, onSelect }: { icon: Luci
   )
 }
 
-function GuestsDialog({ order, open, onClose }: { order: Order; open: boolean; onClose: () => void }) {
+function StaleNotice({ show }: { show: boolean }) {
+  return show ? <p role="alert" className="t-support rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-fg">{STALE_NOTICE}</p> : null
+}
+
+function GuestsDialog({ order, open, onClose, flush }: { order: Order; open: boolean; onClose: () => void; flush: ActionContext['flush'] }) {
   const [guests, setGuests] = useState(order.guest_count)
   const [wasOpen, setWasOpen] = useState(open)
   if (open !== wasOpen) {
     setWasOpen(open)
     if (open) setGuests(order.guest_count)
   }
-  const save = useOrderMutation(order.id, (g: number) => orderApi.update(order.id, order.version, g), { onSuccess: onClose })
+  const at = useOpenVersion(order, open, flush)
+  const save = useOrderMutation(order.id, (x: { guests: number; version: number }) => orderApi.update(order.id, x.version, x.guests), {
+    onSuccess: onClose,
+    onError: at.onError,
+    toastError: at.toastError,
+  })
   return (
     <FormDialog
       open={open}
@@ -96,9 +142,10 @@ function GuestsDialog({ order, open, onClose }: { order: Order; open: boolean; o
       title={`Guests at ${order.table_name}`}
       submitLabel="Save"
       loading={save.isPending}
-      submitDisabled={guests === order.guest_count}
-      onSubmit={() => save.mutate(guests)}
+      submitDisabled={guests === order.guest_count || at.version === null}
+      onSubmit={() => at.version !== null && save.mutate({ guests, version: at.version })}
     >
+      <StaleNotice show={at.stale} />
       <div className="flex items-center gap-3">
         <span className="t-body-strong flex-1 text-fg">Guests</span>
         <Stepper value={guests} onChange={setGuests} min={1} max={100} label="Guests" />
@@ -107,16 +154,20 @@ function GuestsDialog({ order, open, onClose }: { order: Order; open: boolean; o
   )
 }
 
-function CancelDialog({ order, open, onClose }: { order: Order; open: boolean; onClose: () => void }) {
+function CancelDialog({ order, open, onClose, ctx }: { order: Order; open: boolean; onClose: () => void; ctx: ActionContext }) {
   const navigate = useNavigate()
   const { can } = useMe()
   const [reason, setReason] = useState('')
-  const cancel = useOrderMutation(order.id, (r: string) => orderApi.cancel(order.id, order.version, r), {
+  const at = useOpenVersion(order, open, ctx.flush)
+  const cancel = useOrderMutation(order.id, (x: { reason: string; version: number }) => orderApi.cancel(order.id, x.version, x.reason), {
     success: 'Order cancelled',
     onSuccess: () => {
       onClose()
+      ctx.leave()
       navigate(can(P.TABLES_VIEW) ? '/floor' : '/orders')
     },
+    onError: at.onError,
+    toastError: at.toastError,
   })
   return (
     <ConfirmDialog
@@ -132,9 +183,10 @@ function CancelDialog({ order, open, onClose }: { order: Order; open: boolean; o
       confirmLabel="Cancel order"
       destructive
       loading={cancel.isPending}
-      confirmDisabled={reason.trim().length < 3}
-      onConfirm={() => cancel.mutate(reason.trim())}
+      confirmDisabled={reason.trim().length < 3 || at.version === null}
+      onConfirm={() => at.version !== null && cancel.mutate({ reason: reason.trim(), version: at.version })}
     >
+      <StaleNotice show={at.stale} />
       <TextField label="Reason" placeholder="e.g. Guests left" value={reason} maxLength={200} onChange={(e) => setReason(e.target.value)} autoFocus />
     </ConfirmDialog>
   )
@@ -146,8 +198,13 @@ const PICK_TITLE: Record<TablePick, string> = {
   split: 'Split items to a new table',
 }
 
-function TablePicker({ order, pick, onClose }: { order: Order; pick: TablePick | null; onClose: () => void }) {
+function TablePicker({ order, pick, onClose, ctx }: { order: Order; pick: TablePick | null; onClose: () => void; ctx: ActionContext }) {
   const navigate = useNavigate()
+  const at = useOpenVersion(order, pick !== null, ctx.flush)
+  const version = () => {
+    if (at.version === null) return Promise.reject(new ApiError('unexpected', 'Still saving quantities. Try again in a moment.'))
+    return Promise.resolve(at.version)
+  }
   const floor = usePickerFloor(pick !== null)
   const [selection, setSelection] = useState<ReadonlySet<number>>(new Set())
   const [guests, setGuests] = useState(1)
@@ -162,40 +219,49 @@ function TablePicker({ order, pick, onClose }: { order: Order; pick: TablePick |
   }
 
   const refetchFloor = () => void floor.refetch()
-  const move = useOrderMutation(order.id, (t: DiningTable) => orderApi.transfer(order.id, order.version, t.id), {
+  const onError = (err: ApiError) => {
+    refetchFloor()
+    at.onError(err)
+    if (err.kind === 'stale') setConfirm(null)
+  }
+  const move = useOrderMutation(order.id, async (t: DiningTable) => orderApi.transfer(order.id, await version(), t.id), {
     success: (_, t) => `Moved to ${t.name}`,
     onSuccess: () => {
       setConfirm(null)
       onClose()
     },
-    onError: refetchFloor,
+    onError,
+    toastError: at.toastError,
   })
-  const merge = useOrderMutation(order.id, (t: DiningTable) => {
+  const merge = useOrderMutation(order.id, async (t: DiningTable) => {
     const src = t.active_order
-    if (!src) return Promise.reject(new Error('That table has no open check.'))
-    return orderApi.merge(order.id, order.version, src.id, src.version)
+    if (!src) throw new ApiError('invalid-state', 'That table has no open check any more.')
+    return orderApi.merge(order.id, await version(), src.id, src.version)
   }, {
     success: (_, t) => `${t.name} merged into this order`,
     onSuccess: () => {
       setConfirm(null)
       onClose()
     },
-    onError: refetchFloor,
+    onError,
+    toastError: at.toastError,
   })
-  const split = useOrderMutation(order.id, (t: DiningTable) => orderApi.split(order.id, order.version, t.id, [...selection], guests), {
+  const split = useOrderMutation(order.id, async (t: DiningTable) => orderApi.split(order.id, await version(), t.id, [...selection], guests), {
     success: (_, t) => `Split to ${t.name}`,
     onSuccess: (created) => {
       onClose()
+      ctx.leave()
       navigate(`/orders/${created.id}`)
     },
-    onError: refetchFloor,
+    onError,
+    toastError: at.toastError,
   })
   const busy = move.isPending || merge.isPending || split.isPending
 
   const splittable = splittableItems(order.items)
   const problem = splitProblem(selection, order.items)
   const candidates = floor.data && pick ? pickCandidates(floor.data.tables, order, pick) : []
-  const tilesEnabled = pick !== 'split' || problem === null
+  const tilesEnabled = (pick !== 'split' || problem === null) && at.version !== null
 
   const onPick = (t: DiningTable) => {
     if (pick === 'split') split.mutate(t)
@@ -212,6 +278,7 @@ function TablePicker({ order, pick, onClose }: { order: Order; pick: TablePick |
     <>
       <Drawer open={pick !== null} onOpenChange={(o) => !o && onClose()} title={pick ? PICK_TITLE[pick] : ''} description={subtitle} busy={busy} width={460}>
         <div className="flex flex-col gap-5 pb-6">
+          <StaleNotice show={at.stale} />
           {pick === 'split' && (
             splittable.length === 0 ? (
               <p className="t-support text-fg2">Nothing can be split yet: items still with the kitchen stay on this check until they're served.</p>
