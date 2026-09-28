@@ -86,6 +86,7 @@ services:
       BISTRO_DOMAIN: ${BISTRO_DOMAIN:?set in .env.prod}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ../web-dist:/srv/web:ro
       - caddy_data:/data
       - caddy_config:/config
     networks: [edge]

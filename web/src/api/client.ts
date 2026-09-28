@@ -75,7 +75,7 @@ async function send(path: string, opts: RequestOptions, token: string | null): P
       throw new ApiError('timeout', 'The server is taking too long to respond. Try again.')
     }
     if (e instanceof DOMException && e.name === 'AbortError') throw e
-    throw new ApiError(navigator.onLine ? 'offline' : 'offline', "Can't reach Bistro. Check the connection and try again.")
+    throw new ApiError('offline', "Can't reach Bistro. Check the connection and try again.")
   }
 }
 

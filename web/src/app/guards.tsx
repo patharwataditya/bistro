@@ -1,6 +1,6 @@
-import { Lock, SearchX } from 'lucide-react'
+import { CircleAlert, Lock, SearchX } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { Link, Navigate, useLocation } from 'react-router'
+import { Link, Navigate, useLocation, useRouteError } from 'react-router'
 import type { Permission } from '@/auth/permissions'
 import { useMe, useSession } from '@/auth/session'
 import { Button } from '@/ui/Button'
@@ -56,4 +56,23 @@ export function RequireSession({ children }: { children: ReactNode }) {
 export function HomeRedirect() {
   const { grants } = useMe()
   return <Navigate to={homePath(grants)} replace />
+}
+
+/**
+ * Last-resort boundary for a render crash. It never shows a stack trace (the details go to
+ * the console only); the only offer is a reload, which re-fetches everything from the server.
+ */
+export function RouteError() {
+  const error = useRouteError()
+  console.error(error)
+  return (
+    <div role="alert" className="grid min-h-[60vh] place-items-center px-4">
+      <EmptyState
+        icon={CircleAlert}
+        title="Something went wrong"
+        message="This screen hit an unexpected problem. Nothing you already saved is lost — reload to continue."
+        action={<Button variant="secondary" onClick={() => window.location.reload()}>Reload</Button>}
+      />
+    </div>
+  )
 }

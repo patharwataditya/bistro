@@ -42,7 +42,6 @@ export function Shell() {
         Skip to content
       </a>
       <aside
-        aria-label="Main navigation"
         className={cn(
           'sticky top-0 hidden h-dvh shrink-0 flex-col border-r border-line bg-surface md:flex',
           'transition-[width] duration-200 ease-[var(--ease-standard)]',
@@ -53,7 +52,7 @@ export function Shell() {
           <BrandMark size={36} />
           <span className={cn('t-section hidden font-extrabold tracking-tight text-fg', !collapsed && 'xl:inline')}>Bistro</span>
         </div>
-        <nav className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-3">
+        <nav aria-label="Main navigation" className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-3 py-3">
           <NavGroup label="Operations" items={ops} collapsed={collapsed} />
           {manage.length > 0 && <NavGroup label="Manage" items={manage} collapsed={collapsed} />}
         </nav>

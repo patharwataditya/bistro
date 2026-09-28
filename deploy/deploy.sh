@@ -1,16 +1,32 @@
 #!/bin/bash
-# Ship the current backend to the EC2 host and restart the API with zero config drift:
-# rsync code → rebuild image on the host → compose up (migrations run on container start).
+# Ship the current backend and web app to the EC2 host with zero config drift:
+# build the web app here → rsync code + static files → rebuild the API image on the host →
+# compose up (migrations run on container start). Node never runs on the server.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 IP=$(cat deploy/state/ip)
 DOMAIN=$(cat deploy/state/domain)
 SSH=(ssh -i "$HOME/.ssh/bistro-key.pem" "ubuntu@$IP")
+RSYNC_SSH="ssh -i $HOME/.ssh/bistro-key.pem"
+
+NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+if [ "$NODE_MAJOR" -lt 22 ]; then
+  echo "Node 22+ is needed to build the web app (see web/.nvmrc)" >&2
+  exit 1
+fi
+(cd web && npm ci --no-audit --no-fund --silent && npm run build --silent)
 rsync -az --delete -e "ssh -i $HOME/.ssh/bistro-key.pem" \
   --exclude .venv --exclude __pycache__ --exclude .pytest_cache --exclude .mypy_cache \
   --exclude .ruff_cache --exclude tests --exclude .env backend "ubuntu@$IP:~/bistro/"
 rsync -az -e "ssh -i $HOME/.ssh/bistro-key.pem" --exclude state --exclude provision.sh --exclude deploy.sh \
   deploy/ "ubuntu@$IP:~/bistro/deploy/"
+# Hashed bundles first and never deleted immediately: a tab still running the previous build
+# can finish loading its chunks. index.html goes last, so it only ever points at files present.
+"${SSH[@]}" "mkdir -p ~/bistro/web-dist/assets"
+rsync -az -e "$RSYNC_SSH" web/dist/assets/ "ubuntu@$IP:~/bistro/web-dist/assets/"
+rsync -az --delete -e "$RSYNC_SSH" --exclude assets --exclude index.html web/dist/ "ubuntu@$IP:~/bistro/web-dist/"
+rsync -az -e "$RSYNC_SSH" web/dist/index.html "ubuntu@$IP:~/bistro/web-dist/index.html"
+"${SSH[@]}" "find ~/bistro/web-dist/assets -type f -mtime +14 -delete"
 # --pull: base images (Python, Postgres, Caddy) pick up upstream security fixes on each deploy.
 "${SSH[@]}" "set -eo pipefail; cd ~/bistro/deploy && C='sudo docker compose --env-file .env.prod -f docker-compose.prod.yml' && \$C pull --quiet db caddy && \$C build --pull 2>&1 | tail -1 && \$C up -d 2>&1 | tail -3 && sudo docker image prune -f >/dev/null"
 for i in $(seq 1 30); do
