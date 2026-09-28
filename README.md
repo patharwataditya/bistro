@@ -1,13 +1,16 @@
 # Bistro — Restaurant Operations Manager
 
-Android app (Kotlin/Compose) + FastAPI/PostgreSQL API for running tables, orders, the
-kitchen, billing, staff access and reporting. Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md);
+Android app (Kotlin/Compose), web app (React/TypeScript) and a FastAPI/PostgreSQL API for
+running tables, orders, the kitchen, billing, staff access and reporting.
+
+**Run it locally (Windows, macOS, Linux): see [docs/SETUP.md](docs/SETUP.md).** Design: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md);
 Android patterns: [docs/ANDROID_CONVENTIONS.md](docs/ANDROID_CONVENTIONS.md).
 
 | Path | What |
 |---|---|
 | `backend/` | FastAPI app, Alembic migrations, pytest suite, Dockerfile |
 | `android/` | Android app (`ai.synkrasis.bistro`) |
+| `web/` | Bistro Web (React + TypeScript, Vite); design docs in `docs/web/` |
 | `contract/enums.json` | State/permission/error values shared by both sides (tests on each side enforce it) |
 | `deploy/` | EC2 provisioning, production compose (Caddy + API + Postgres), backups, redeploy |
 
@@ -22,7 +25,7 @@ docker exec bistro-dev-db psql -U bistro -c "CREATE DATABASE bistro_test"
 cp .env.example .env                       # BISTRO_ENVIRONMENT=development
 uv run alembic upgrade head
 uv run python -m app.cli demo              # demo data; accounts owner/admin/manager/cashier/chef/server, password bistro-demo-1
-uv run uvicorn app.main:app --reload       # docs at /api/v1/docs (not exposed in production)
+uv run uvicorn app.main:app --port 8010 --reload  # docs at /api/v1/docs (not in production)
 
 uv run pytest                              # API, RBAC, state machines, money, real-concurrency tests
 uv run ruff check app tests && uv run mypy app
@@ -34,6 +37,16 @@ Configuration is environment-only (`BISTRO_*`, see `app/core/config.py`). Anythi
 CLI (`python -m app.cli`): `sync` (permission catalog, runs on every start), `bootstrap`
 (first restaurant + owner; password from `BISTRO_OWNER_PASSWORD`), `sample-floor`
 (tables/menu/taxes, no accounts), `demo` (dev only), `purge-idempotency`.
+
+## Web
+
+```sh
+cd web
+npm ci
+npm run dev                                # http://127.0.0.1:5173, proxies /api to :8010
+npm test && npm run lint && npm run typecheck
+npm run e2e                                # Playwright, against the running backend + dev server
+```
 
 ## Android
 

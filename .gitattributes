@@ -1,0 +1,10 @@
+# Keep LF in the repository; check out native line endings, except where a tool needs one.
+* text=auto
+*.sh text eol=lf
+android/gradlew text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.woff2 binary
+*.jar binary
