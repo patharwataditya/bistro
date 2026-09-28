@@ -31,7 +31,7 @@
 		reverse_proxy api:8000 {
 			header_down -Via
 			health_uri /api/v1/health
-			health_interval 30s
+			health_interval 5s
 		}
 	}
 

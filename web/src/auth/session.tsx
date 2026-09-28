@@ -7,7 +7,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { authRequest, configureAuth, request } from '@/api/client'
-import { idleSeconds } from './activity'
+import { idleSeconds, markReported, setReturnHandler } from './activity'
 import { ApiError } from '@/api/errors'
 import type { Me, WebSession } from '@/api/types'
 import { Grants, type Permission } from './permissions'
@@ -35,6 +35,18 @@ const LOCK = 'bistro-auth-refresh'
 let accessToken: string | null = null
 /** Why the last refresh ended the session, when the person should be told (idle timeout). */
 let endedNotice: string | null = null
+/** A sign-out whose server call failed: finish it before restoring any session. */
+const LOGOUT_PENDING = 'bistro.logout-pending'
+
+function readFlag(key: string): boolean {
+  try { return localStorage.getItem(key) === '1' } catch { return false }
+}
+function writeFlag(key: string, on: boolean): void {
+  try {
+    if (on) localStorage.setItem(key, '1')
+    else localStorage.removeItem(key)
+  } catch { /* storage unavailable */ }
+}
 
 async function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
   if ('locks' in navigator && navigator.locks) {
@@ -69,6 +81,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       try {
         const s = await authRequest<WebSession>('/auth/web/refresh', { idle_seconds: idleSeconds() })
         accessToken = s.access_token
+        markReported()
         return accessToken
       } catch (e) {
         if (e instanceof ApiError && e.kind === 'session-ended') {
@@ -87,6 +100,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const restore = useCallback(async () => {
     try {
+      if (readFlag(LOGOUT_PENDING)) {
+        // The last sign-out never reached the server. Finish it; if that still fails, stay
+        // signed out rather than resuming the previous person's session.
+        try {
+          await authRequest('/auth/web/logout')
+          writeFlag(LOGOUT_PENDING, false)
+        } catch { /* retried on the next load */ }
+        setState({ status: 'signed-out', notice: null })
+        return
+      }
       const token = await refresh(null)
       if (!token) {
         setState({ status: 'signed-out', notice: endedNotice })
@@ -130,13 +153,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     channel.current = ch
     ch.onmessage = (event: MessageEvent<unknown>) => {
       if (event.data === 'signed-out') endLocally('You signed out in another tab.')
-      if (event.data === 'signed-in') void restore()
+      if (event.data === 'signed-in') {
+        // Someone signed in from another tab: drop this tab's token and data first, so
+        // nothing loaded for a previous person is shown under the new session.
+        accessToken = null
+        queryClient.clear()
+        void restore()
+      }
     }
     return () => {
       ch.close()
       channel.current = null
     }
-  }, [endLocally, restore])
+  }, [endLocally, restore, queryClient])
 
   const signIn = useCallback(
     async (username: string, password: string) => {
@@ -146,6 +175,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         device_label: `Web · ${navigator.platform || 'browser'}`.slice(0, 120),
       })
       accessToken = s.access_token
+      markReported()
+      writeFlag(LOGOUT_PENDING, false) // signing in replaces any session this browser held
       queryClient.clear()
       await loadMe()
       channel.current?.postMessage('signed-in')
@@ -157,11 +188,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Local first: a slow network can never leave anyone half signed out.
     endLocally(null)
     channel.current?.postMessage('signed-out')
+    writeFlag(LOGOUT_PENDING, true)
     try {
       await authRequest('/auth/web/logout')
+      writeFlag(LOGOUT_PENDING, false)
     } catch {
-      // The cookie is cleared server-side on the next successful call; the session also
-      // idles out. Nothing more to do here.
+      // Kept pending: the next load of the app finishes the sign-out before anything else.
     }
   }, [endLocally])
 
@@ -184,6 +216,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Keep the current profile; the next request will surface any real problem.
     }
   }, [loadMe])
+
+  // Tell the server as soon as someone comes back after a quiet spell (see activity.ts).
+  const signedIn = state.status === 'signed-in'
+  useEffect(() => {
+    if (!signedIn) return
+    setReturnHandler(() => {
+      void refresh(accessToken).then((token) => {
+        if (!token) endLocally(endedNotice)
+      }, () => { /* offline: the next request reports it */ })
+    })
+    return () => setReturnHandler(null)
+  }, [signedIn, refresh, endLocally])
 
   // Permissions can be changed by a manager at any time: re-read the profile when the
   // window regains focus (at most once a minute).

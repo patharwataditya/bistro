@@ -8,12 +8,7 @@ import { cn } from '@/ui/cn'
 import { TextField } from '@/ui/Field'
 import { BrandMark } from './Brand'
 import { homePath } from './nav'
-
-/** Only same-app paths are honoured as a post-login destination (no open redirects). */
-function safeNext(next: string | null): string | null {
-  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/\\')) return null
-  return next
-}
+import { safeNext } from './safeNext'
 
 export function LoginPage() {
   const { state, signIn } = useSession()

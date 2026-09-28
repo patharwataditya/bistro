@@ -37,6 +37,10 @@ if [ ! -f .env.prod ]; then
   } > .env.prod
 fi
 
+# Owned by ubuntu before compose runs: otherwise Docker creates the bind-mount source as root
+# and deploy.sh can never publish the web app into it.
+mkdir -p ../web-dist
+
 sudo docker compose --env-file .env.prod -f docker-compose.prod.yml pull --quiet db caddy
 sudo docker compose --env-file .env.prod -f docker-compose.prod.yml build --pull
 sudo docker compose --env-file .env.prod -f docker-compose.prod.yml up -d

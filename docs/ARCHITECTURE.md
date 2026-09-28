@@ -15,7 +15,7 @@ Android app ──HTTPS──▶ Caddy (TLS, rate limits) ──▶ FastAPI (uvi
 | `backend/` | FastAPI app (`app/`), Alembic migrations, tests, Dockerfile |
 | `android/` | Android app (single `:app` module, package `ai.synkrasis.bistro`) |
 | `contract/enums.json` | Canonical enum/state values shared by both sides; tests on each side fail on drift |
-| `deploy/` | docker-compose.prod, Caddyfile, provisioning + backup scripts |
+| `deploy/` | docker-compose.prod, caddy/Caddyfile, provisioning + backup scripts |
 
 ## 2. Backend layers
 

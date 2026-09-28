@@ -87,7 +87,9 @@ services:
     environment:
       BISTRO_DOMAIN: ${BISTRO_DOMAIN:?set in .env.prod}
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # A directory mount, so an updated Caddyfile (rsync writes a new file) is visible
+      # inside the running container and `caddy reload` picks it up.
+      - ./caddy:/etc/caddy:ro
       - ../web-dist:/srv/web:ro
       - caddy_data:/data
       - caddy_config:/config

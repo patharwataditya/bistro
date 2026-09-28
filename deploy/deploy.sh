@@ -22,13 +22,15 @@ rsync -az -e "ssh -i $HOME/.ssh/bistro-key.pem" --exclude state --exclude provis
   deploy/ "ubuntu@$IP:~/bistro/deploy/"
 # Hashed bundles first and never deleted immediately: a tab still running the previous build
 # can finish loading its chunks. index.html goes last, so it only ever points at files present.
-"${SSH[@]}" "mkdir -p ~/bistro/web-dist/assets"
-rsync -az -e "$RSYNC_SSH" web/dist/assets/ "ubuntu@$IP:~/bistro/web-dist/assets/"
-rsync -az --delete -e "$RSYNC_SSH" --exclude assets --exclude index.html web/dist/ "ubuntu@$IP:~/bistro/web-dist/"
-rsync -az -e "$RSYNC_SSH" web/dist/index.html "ubuntu@$IP:~/bistro/web-dist/index.html"
+# (A directory Docker created as root on an older setup is handed back to ubuntu first.)
+"${SSH[@]}" "sudo mkdir -p ~/bistro/web-dist/assets && sudo chown -R ubuntu: ~/bistro/web-dist"
+WEB_RSYNC=(rsync -az --chmod=D755,F644 -e "$RSYNC_SSH")  # readable by Caddy whatever the local umask
+"${WEB_RSYNC[@]}" web/dist/assets/ "ubuntu@$IP:~/bistro/web-dist/assets/"
+"${WEB_RSYNC[@]}" --delete --exclude assets --exclude index.html web/dist/ "ubuntu@$IP:~/bistro/web-dist/"
+"${WEB_RSYNC[@]}" web/dist/index.html "ubuntu@$IP:~/bistro/web-dist/index.html"
 "${SSH[@]}" "find ~/bistro/web-dist/assets -type f -mtime +14 -delete"
 # --pull: base images (Python, Postgres, Caddy) pick up upstream security fixes on each deploy.
-"${SSH[@]}" "set -eo pipefail; cd ~/bistro/deploy && C='sudo docker compose --env-file .env.prod -f docker-compose.prod.yml' && \$C pull --quiet db caddy && \$C build --pull 2>&1 | tail -1 && \$C up -d 2>&1 | tail -3 && sudo docker image prune -f >/dev/null"
+"${SSH[@]}" "set -eo pipefail; cd ~/bistro/deploy && C='sudo docker compose --env-file .env.prod -f docker-compose.prod.yml' && \$C pull --quiet db caddy && \$C build --pull 2>&1 | tail -1 && \$C up -d 2>&1 | tail -3 && \$C exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>&1 | tail -1 && sudo docker image prune -f >/dev/null"
 for i in $(seq 1 30); do
   if curl -fsS --max-time 5 "https://$DOMAIN/api/v1/health" >/dev/null; then
     echo "healthy: https://$DOMAIN"
