@@ -127,6 +127,8 @@ export interface paths {
         /**
          * Change Password
          * @description Change your password. Signs out every other device; returns fresh tokens for this one.
+         *     Phone sessions only: a browser uses /auth/web/password, which keeps its token in a cookie
+         *     and its browser session limits.
          */
         post: operations["change_password_api_v1_me_password_post"];
         delete?: never;
@@ -147,7 +149,8 @@ export interface paths {
         /**
          * Login
          * @description Sign in from the browser. Shares the per-user and per-address throttles with /auth/login.
-         *     Browser sessions last at most 12 hours and end after 2 hours idle.
+         *     Browser sessions last at most 12 hours and end after 2 hours without interaction. A
+         *     browser holds one session: signing in over someone else's ends theirs.
          */
         post: operations["login_api_v1_auth_web_login_post"];
         delete?: never;
@@ -167,7 +170,8 @@ export interface paths {
         put?: never;
         /**
          * Refresh
-         * @description New access token from the refresh cookie (rotated on every call).
+         * @description New access token from the refresh cookie (rotated on every call). The app reports how
+         *     long the person has been idle; background polling alone never extends the session.
          */
         post: operations["refresh_api_v1_auth_web_refresh_post"];
         delete?: never;
@@ -1983,6 +1987,8 @@ export interface components {
             permissions: string[];
             /** Member Count */
             member_count: number;
+            /** Assigned Count */
+            assigned_count: number;
             /** Version */
             version: number;
             /** Editable */
@@ -2408,6 +2414,11 @@ export interface components {
             /** Reason */
             reason: string;
         };
+        /** WebRefreshIn */
+        WebRefreshIn: {
+            /** Idle Seconds */
+            idle_seconds?: number | null;
+        };
         /** WebSession */
         WebSession: {
             /** Access Token */
@@ -2657,7 +2668,11 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["WebRefreshIn"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -2666,6 +2681,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WebSession"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

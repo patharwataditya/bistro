@@ -1,14 +1,15 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { CircleAlert, ReceiptText, Trash2 } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
+import { CircleAlert, ReceiptText, RefreshCw, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { Controller, useForm } from 'react-hook-form'
 import { z } from 'zod'
 import { keys } from '@/api/queries'
-import type { Area, DiningTable } from '@/api/types'
+import type { Area, DiningTable, Floor } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
 import { useAction } from '@/features/common/useAction'
-import { applyServerErrors, DrawerActions, Notice, useDiscardConfirm } from '@/features/staff/manage-kit'
+import { applyServerErrors, DrawerActions, Notice, useDiscardConfirm, useUnsavedGuard } from '@/features/staff/manage-kit'
 import { Button } from '@/ui/Button'
 import { Stepper } from '@/ui/Controls'
 import { SelectField, TextField } from '@/ui/Field'
@@ -37,7 +38,15 @@ export function TablesManageDrawer({ editor, areas, onClose }: { editor: TableEd
 function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; onClose: () => void }) {
   const { can } = useMe()
   const toast = useToast()
-  const table = editor.mode === 'edit' ? editor.table : null
+  const queryClient = useQueryClient()
+  /**
+   * The server copy the edit is saved against. A table's version also moves when guests are
+   * seated or it's marked for cleaning, so a STALE answer is common here: then we fetch the
+   * fresh copy, keep the person's values, and let them save again onto the new version.
+   */
+  const [table, setTable] = useState<DiningTable | null>(editor.mode === 'edit' ? editor.table : null)
+  const [rebasing, setRebasing] = useState(false)
+  const [changedMeanwhile, setChangedMeanwhile] = useState(false)
   const editable = table ? can(P.TABLES_UPDATE) : can(P.TABLES_CREATE)
   const canDelete = !!table && can(P.TABLES_DELETE)
   const hasOrder = !!table?.active_order
@@ -67,9 +76,26 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
     toastError: false,
     onSuccess: onClose,
     onError: (e) => {
-      if (e.kind === 'stale' || e.kind === 'not-found') {
+      if (e.kind === 'not-found') {
         toast.error(e.message)
         onClose()
+        return
+      }
+      if (e.kind === 'stale' && table) {
+        setFormError(null)
+        setRebasing(true)
+        const id = table.id
+        void queryClient.refetchQueries({ queryKey: keys.floor, exact: true }).then(() => {
+          const fresh = queryClient.getQueryData<Floor>(keys.floor)?.tables.find((t) => t.id === id)
+          setRebasing(false)
+          if (!fresh) {
+            toast.error('This table was removed meanwhile.')
+            onClose()
+            return
+          }
+          setTable(fresh)
+          setChangedMeanwhile(true)
+        })
         return
       }
       onFail(e)
@@ -85,12 +111,15 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
     onError: () => setConfirmDelete(false),
   })
 
-  const busy = create.isPending || update.isPending || remove.isPending
+  const busy = create.isPending || update.isPending || remove.isPending || rebasing
   const discard = useDiscardConfirm(formState.isDirty && editable)
+  // Browser Back / in-app links / closing the tab ask first too, like the page forms.
+  const guard = useUnsavedGuard(formState.isDirty && editable)
   const sortedAreas = [...areas].sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name))
 
   const submit = handleSubmit((v) => {
     setFormError(null)
+    setChangedMeanwhile(false)
     if (table) {
       if (!tableBodyChanged(updateTableBody(table, v))) return onClose()
       update.mutate(v)
@@ -98,6 +127,12 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
       create.mutate(v)
     }
   })
+
+  const removeButton = (
+    <Button variant="danger" icon={Trash2} disabled={busy || hasOrder} aria-describedby={hasOrder ? 'table-order-note' : undefined} onClick={() => setConfirmDelete(true)}>
+      Remove
+    </Button>
+  )
 
   return (
     <>
@@ -109,18 +144,15 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
         description={table ? `${table.capacity} seats · ${table.area_name ?? 'No area'}` : 'Name it the way staff say it, e.g. 12 or T4.'}
         footer={
           <DrawerActions
+            leading={canDelete && editable ? removeButton : undefined}
             secondary={
-              canDelete ? (
-                <Button variant="danger" icon={Trash2} disabled={busy || hasOrder} aria-describedby={hasOrder ? 'table-order-note' : undefined} onClick={() => setConfirmDelete(true)}>
-                  Remove
-                </Button>
-              ) : (
+              canDelete && !editable ? removeButton : editable ? (
                 <Button variant="secondary" disabled={busy} onClick={() => discard.request(onClose)}>Cancel</Button>
-              )
+              ) : undefined
             }
             primary={
               editable ? (
-                <Button type="submit" form="table-form" loading={create.isPending || update.isPending} disabled={!!table && !formState.isDirty}>
+                <Button type="submit" form="table-form" loading={create.isPending || update.isPending || rebasing} disabled={!!table && !formState.isDirty}>
                   {table ? 'Save' : 'Add table'}
                 </Button>
               ) : (
@@ -137,6 +169,11 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
             </div>
           )}
           {table && !editable && canDelete && <Notice>You can remove tables but not change them.</Notice>}
+          {changedMeanwhile && (
+            <Notice tone="warning" icon={RefreshCw} live>
+              This table changed while you were editing (for example, guests were seated). Your changes are kept — check them and save again.
+            </Notice>
+          )}
           {formError && <Notice tone="danger" icon={CircleAlert} live>{formError}</Notice>}
           <TextField label="Table name" maxLength={20} autoComplete="off" disabled={!editable} error={formState.errors.name?.message} {...register('name')} />
           <Controller
@@ -187,6 +224,7 @@ function Body({ editor, areas, onClose }: { editor: TableEditor; areas: Area[]; 
         </form>
       </Drawer>
       {discard.dialog}
+      {guard}
       {table && (
         <ConfirmDialog
           open={confirmDelete}

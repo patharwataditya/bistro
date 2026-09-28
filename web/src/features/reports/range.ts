@@ -109,28 +109,29 @@ function zoneOffset(ms: number, zone: string): number {
 }
 
 /**
- * The UTC instant of local midnight at the start of `date` in `zone` (DST-safe: if midnight
- * doesn't exist that day, the first instant of the day).
+ * The UTC instant of local midnight at the start of `date` in `zone`, matching the backend's
+ * `datetime.combine(date, time.min, zone)` (fold=0):
+ * - midnight happens twice (clocks fall back from 01:00 to 00:00): the first one;
+ * - midnight doesn't exist (clocks spring forward at 00:00): the day's first instant.
  */
 export function startOfDayInZone(date: string, zone: string): string {
   const [y, m, d] = parts(date)
   const wall = Date.UTC(y, m - 1, d)
-  let guess = wall - zoneOffset(wall, zone)
-  // A second pass settles the offset when a DST change falls between the two instants.
-  guess = wall - zoneOffset(guess, zone)
-  if (localDate(zone, guess) !== date || localDate(zone, guess - 1) === date) {
-    // Midnight doesn't exist that day (zones that spring forward at 00:00): find the day's
-    // first instant by bisection, to the minute.
-    let lo = guess - 4 * 3_600_000
-    let hi = guess + 4 * 3_600_000
-    while (hi - lo > 60_000) {
-      const mid = lo + Math.floor((hi - lo) / 2)
-      if (localDate(zone, mid) >= date) hi = mid
-      else lo = mid
-    }
-    guess = hi - (hi % 60_000)
+  // A zone changes offset at most once around any midnight, so the offsets a day either side
+  // are the only candidates. A candidate is valid when it shows exactly local midnight.
+  const valid = [zoneOffset(wall - 86_400_000, zone), zoneOffset(wall + 86_400_000, zone)]
+    .map((off) => wall - off)
+    .filter((t) => t + zoneOffset(t, zone) === wall)
+  if (valid.length > 0) return new Date(Math.min(...valid)).toISOString()
+  // Midnight was skipped: find the day's first instant by bisection, to the minute.
+  let lo = wall - 30 * 3_600_000
+  let hi = wall + 30 * 3_600_000
+  while (hi - lo > 60_000) {
+    const mid = lo + Math.floor((hi - lo) / 2)
+    if (localDate(zone, mid) >= date) hi = mid
+    else lo = mid
   }
-  return new Date(guess).toISOString()
+  return new Date(hi - (hi % 60_000)).toISOString()
 }
 
 /** Human label for a range: "28 Sept 2026" or "22 Sept – 28 Sept 2026". */

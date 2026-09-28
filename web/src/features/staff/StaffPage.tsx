@@ -13,7 +13,8 @@ import { EmptyState, ErrorState, StaleBanner } from '@/ui/States'
 import { DataTable, Td, Th } from '@/ui/Table'
 import { AddStaffDrawer } from './AddStaffDrawer'
 import { PAGE_SIZE, useRoleList, useStaffPage } from './api'
-import { Avatar, rowProps, SearchInput, TableSkeleton, Toolbar } from './manage-kit'
+import { Avatar, RowOpen, rowProps, SearchInput, TableSkeleton, Toolbar } from './manage-kit'
+import { clampOffset } from './paging'
 import { rolesFromMembers, type RoleOption } from './roleAssign'
 import { StaffDetailDrawer } from './StaffDetailDrawer'
 
@@ -48,6 +49,9 @@ export default function StaffPage() {
     }
     return rolesFromMembers(users.data?.items ?? [])
   }, [canReadRoles, roleList.data, users.data])
+  // Without the role list (no roles.view, or it failed to load) the options above are only
+  // the roles seen on this page of staff, so the pickers say so instead of implying "all".
+  const rolesComplete = canReadRoles && !!roleList.data
 
   // The open drawer follows refreshed data by id, so it always shows the latest version.
   const current = selected ? (users.data?.items.find((m) => m.id === selected.id) ?? selected) : null
@@ -56,6 +60,9 @@ export default function StaffPage() {
   const page = users.data
   const total = page?.total ?? 0
   const searching = q.length > 0
+  // The last row of the last page went away (deactivated, or filtered out): step back a page.
+  const clamped = page && !users.isPlaceholderData ? clampOffset(offset, total, PAGE_SIZE) : null
+  if (clamped !== null && clamped !== offset) setOffset(clamped)
 
   const changeFilter = (fn: () => void) => {
     fn()
@@ -83,7 +90,7 @@ export default function StaffPage() {
         <TableSkeleton rows={8} cols={5} />
       ) : users.isError && !users.data ? (
         <ErrorState error={users.error} onRetry={() => void users.refetch()} />
-      ) : page && page.items.length === 0 ? (
+      ) : page && page.items.length === 0 && offset === 0 ? (
         <EmptyState
           icon={searching ? SearchX : Users}
           title={searching ? `No one matches "${q}"` : 'No staff yet'}
@@ -108,13 +115,15 @@ export default function StaffPage() {
             </thead>
             <tbody>
               {page.items.map((m) => (
-                <tr key={m.id} {...rowProps(() => setSelected(m), `Manage ${m.full_name}`)}>
+                <tr key={m.id} {...rowProps(() => setSelected(m))}>
                   <Td>
-                    <span className="flex items-center gap-3">
-                      <Avatar name={m.full_name} muted={!m.is_active} />
-                      <span className={m.is_active ? 't-body-strong text-fg' : 't-body-strong text-fg2'}>{m.full_name}</span>
-                      {m.id === me.id && <span className="t-status rounded-full bg-accent-soft px-2 py-0.5 text-accent">You</span>}
-                    </span>
+                    <RowOpen onOpen={() => setSelected(m)}>
+                      <span className="flex items-center gap-3">
+                        <Avatar name={m.full_name} muted={!m.is_active} />
+                        <span className={m.is_active ? 't-body-strong text-fg' : 't-body-strong text-fg2'}>{m.full_name}</span>
+                        {m.id === me.id && <span className="t-status rounded-full bg-accent-soft px-2 py-0.5 text-accent">You</span>}
+                      </span>
+                    </RowOpen>
                   </Td>
                   <Td className="t-support text-fg2">@{m.username}</Td>
                   <Td>
@@ -134,10 +143,10 @@ export default function StaffPage() {
               ))}
             </tbody>
           </DataTable>
-          {total > PAGE_SIZE && (
+          {(total > PAGE_SIZE || offset > 0) && (
             <nav aria-label="Pages" className="mt-3 flex items-center justify-end gap-2">
               <span className="t-meta mr-2 text-fg2" aria-live="polite">
-                {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+                {total === 0 ? 'None' : `${Math.min(offset + 1, total)}–${Math.min(offset + PAGE_SIZE, total)} of ${total}`}
               </span>
               <IconButton icon={ChevronLeft} label="Previous page" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))} />
               <IconButton icon={ChevronRight} label="Next page" disabled={offset + PAGE_SIZE >= total} onClick={() => setOffset(offset + PAGE_SIZE)} />
@@ -146,8 +155,8 @@ export default function StaffPage() {
         </>
       ) : null}
 
-      <AddStaffDrawer open={adding} onClose={() => setAdding(false)} roles={roleOptions} />
-      <StaffDetailDrawer member={fresher} onClose={() => setSelected(null)} onChanged={setSelected} roles={roleOptions} />
+      <AddStaffDrawer open={adding} onClose={() => setAdding(false)} roles={roleOptions} rolesComplete={rolesComplete} />
+      <StaffDetailDrawer member={fresher} onClose={() => setSelected(null)} onChanged={setSelected} roles={roleOptions} rolesComplete={rolesComplete} />
     </div>
   )
 }

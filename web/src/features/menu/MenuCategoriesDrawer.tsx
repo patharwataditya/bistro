@@ -1,5 +1,5 @@
 import { Check, CircleAlert, Pencil, Plus, Trash2, X } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { keys } from '@/api/queries'
 import type { MenuCategory } from '@/api/types'
 import { useAction } from '@/features/common/useAction'
@@ -24,6 +24,13 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
   const [renameError, setRenameError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<MenuCategory | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
+  // After a rename ends, focus goes back to that category's Rename button (the field is gone).
+  const refocus = useRef<number | null>(null)
+  const endRename = () => {
+    if (renaming) refocus.current = renaming.id
+    setRenaming(null)
+    setRenameError(null)
+  }
 
   const add = useAction((name: string) => menuApi.createCategory({
     name,
@@ -39,7 +46,7 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
     invalidate: [keys.menu],
     success: (c) => `Renamed to ${c.name}`,
     toastError: false,
-    onSuccess: () => setRenaming(null),
+    onSuccess: endRename,
     onError: (e) => setRenameError(fieldMessage(e)),
   })
   const remove = useAction((c: MenuCategory) => menuApi.deleteCategory(c.id), {
@@ -54,6 +61,12 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
   })
 
   const busy = add.isPending || rename.isPending || remove.isPending
+  useEffect(() => {
+    // Runs after every render; waits until the buttons are enabled again after a save.
+    if (refocus.current === null || busy) return
+    document.getElementById(`rename-category-${refocus.current}`)?.focus()
+    refocus.current = null
+  })
 
   const submitAdd = (e: FormEvent) => {
     e.preventDefault()
@@ -77,7 +90,7 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
     }
     const current = categories.find((c) => c.id === renaming.id)
     if (current && current.name === name) {
-      setRenaming(null)
+      endRename()
       return
     }
     setRenameError(null)
@@ -93,6 +106,14 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
         title="Categories"
         description="How the menu is grouped for staff"
         width={440}
+        // Escape while renaming cancels the rename, not the whole drawer. (Radix listens for
+        // Escape on the document, so stopping it on the field isn't enough.)
+        onEscapeKeyDown={(e) => {
+          if (renaming) {
+            e.preventDefault()
+            endRename()
+          }
+        }}
       >
         <form onSubmit={submitAdd} className="flex items-start gap-2 pt-1" noValidate>
           <TextField
@@ -141,17 +162,10 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
                         setRenaming({ id: c.id, name: e.target.value })
                         setRenameError(null)
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Escape') {
-                          e.stopPropagation()
-                          e.preventDefault()
-                          setRenaming(null)
-                        }
-                      }}
                       wrapperClassName="flex-1"
                       className="h-11"
                     />
-                    <IconButton icon={X} label="Cancel rename" onClick={() => setRenaming(null)} disabled={rename.isPending} className="mt-0.5" />
+                    <IconButton icon={X} label="Cancel rename" onClick={endRename} disabled={rename.isPending} className="mt-0.5" />
                     <IconButton icon={Check} label="Save name" type="submit" disabled={rename.isPending} className="mt-0.5" />
                   </form>
                 </li>
@@ -161,7 +175,7 @@ export function MenuCategoriesDrawer({ open, onOpenChange, categories }: { open:
                     <div className="t-body-strong truncate text-fg">{c.name}</div>
                     <div className="t-meta text-fg3">{plural(c.item_count, 'item')}</div>
                   </div>
-                  <IconButton icon={Pencil} label={`Rename ${c.name}`} disabled={busy} onClick={() => {
+                  <IconButton id={`rename-category-${c.id}`} icon={Pencil} label={`Rename ${c.name}`} disabled={busy} onClick={() => {
                     setRenameError(null)
                     setRenaming({ id: c.id, name: c.name })
                   }} />

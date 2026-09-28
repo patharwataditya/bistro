@@ -26,7 +26,7 @@ export const OPERATIONS: NavItem[] = [
 
 export const MANAGE: NavItem[] = [
   { to: '/menu', label: 'Menu', icon: BookOpen, any: [P.MENU_VIEW] },
-  { to: '/tables', label: 'Tables & areas', icon: Armchair, any: [P.TABLES_UPDATE, P.TABLES_CREATE] },
+  { to: '/tables', label: 'Tables & areas', icon: Armchair, any: [P.TABLES_UPDATE, P.TABLES_CREATE, P.TABLES_DELETE] },
   { to: '/reports', label: 'Reports', icon: LineChart, any: [P.REPORTS_VIEW] },
   { to: '/staff', label: 'Staff', icon: Users, any: [P.STAFF_VIEW] },
   { to: '/roles', label: 'Roles & permissions', icon: Shield, any: [P.ROLES_VIEW] },

@@ -3,9 +3,9 @@
  * a single highlighted bar, a tooltip on hover or arrow keys, and a data table for anyone who
  * prefers (or needs) the numbers.
  */
-import { Table2, BarChart3 } from 'lucide-react'
+import { Table2 } from 'lucide-react'
 import { motion } from 'motion/react'
-import { useId, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { dateOnly, money, plural } from '@/lib/format'
 import { Card } from '@/ui/Card'
 import { cn } from '@/ui/cn'
@@ -49,8 +49,9 @@ export function BarChart({
   highlightColor: string
 }) {
   const [active, setActive] = useState<number | null>(null)
+  // Only keyboard moves are announced; hovering with a mouse would flood a screen reader.
+  const [viaKey, setViaKey] = useState(false)
   const plotRef = useRef<HTMLDivElement>(null)
-  const tipId = useId()
   const n = bars.length
   const slot = WIDTH / Math.max(n, 1)
   // Few bars stay slender rather than turning into blocks.
@@ -75,11 +76,18 @@ export function BarChart({
     else if (e.key === 'Escape') { setActive(null); return }
     if (next !== null) {
       e.preventDefault()
+      setViaKey(true)
       setActive(next)
     }
   }
 
-  const leftPct = active === null ? 0 : ((active + 0.5) / n) * 100
+  // The tooltip sits inside the plot, beside the selected slot (on whichever side has more
+  // room), so it never covers the card's title or headline figures.
+  const onLeft = active !== null && (active + 0.5) / n > 0.5
+  const tipStyle = active === null ? undefined
+    : onLeft
+      ? { right: `calc(${(1 - active / n) * 100}% + 6px)`, maxWidth: `calc(${(active / n) * 100}% - 6px)` }
+      : { left: `calc(${((active + 1) / n) * 100}% + 6px)`, maxWidth: `calc(${(1 - (active + 1) / n) * 100}% - 6px)` }
 
   return (
     <div className="relative">
@@ -87,9 +95,11 @@ export function BarChart({
         ref={plotRef}
         role="img"
         aria-label={summary}
-        aria-describedby={active !== null ? tipId : undefined}
         tabIndex={0}
-        onPointerMove={(e) => setActive(indexAt(e))}
+        onPointerMove={(e) => {
+          setViaKey(false)
+          setActive(indexAt(e))
+        }}
         onPointerLeave={() => setActive(null)}
         onBlur={() => setActive(null)}
         onKeyDown={onKey}
@@ -97,6 +107,12 @@ export function BarChart({
         style={{ height }}
       >
         <svg viewBox={`0 0 ${WIDTH} ${height}`} preserveAspectRatio="none" className="block size-full overflow-visible" aria-hidden>
+          {active !== null && (
+            <g data-testid="chart-cursor">
+              <rect x={active * slot} y={0} width={slot} height={height} fill="var(--hover-overlay)" />
+              <line x1={active * slot + slot / 2} x2={active * slot + slot / 2} y1={0} y2={height} stroke="var(--text-tertiary)" strokeWidth={1} strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
+            </g>
+          )}
           {bars.map((b, i) => {
             const x = i * slot + space / 2
             const dim = active !== null && active !== i
@@ -120,14 +136,17 @@ export function BarChart({
         </svg>
         {active !== null && (
           <div
-            id={tipId}
-            role="status"
-            className="pointer-events-none absolute bottom-full z-10 mb-2 w-max max-w-[240px] -translate-x-1/2 rounded-[var(--radius-sm)] border border-line-strong bg-raised px-3 py-2 shadow-float"
-            style={{ left: `clamp(80px, ${leftPct}%, calc(100% - 80px))` }}
+            aria-hidden
+            className="pointer-events-none absolute top-0 z-10 w-max rounded-[var(--radius-sm)] border border-line-strong bg-raised px-3 py-2 shadow-float"
+            style={tipStyle}
           >
             {tooltip(active)}
           </div>
         )}
+      </div>
+      {/* Outside role="img" (whose content is presentational), so the selection is announced. */}
+      <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="chart-announcer">
+        {active !== null && viaKey ? tooltip(active) : null}
       </div>
       <div className="mt-2">{axis}</div>
     </div>
@@ -152,14 +171,18 @@ export function ChartCard({ title, subtitle, legend, chart, table, caption, clas
           <h2 className="t-card-title text-fg">{title}</h2>
           {subtitle && <p className="t-support text-fg2">{subtitle}</p>}
         </div>
+        {/* A toggle keeps one label; aria-pressed (and the pressed look) carries the state. */}
         <button
           type="button"
           onClick={() => setAsTable((v) => !v)}
           aria-pressed={asTable}
-          className="t-meta inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full px-3 text-fg2 hover:bg-[var(--hover-overlay)] hover:text-fg"
+          className={cn(
+            't-meta inline-flex h-10 shrink-0 items-center gap-1.5 rounded-full border px-3 hover:text-fg',
+            asTable ? 'border-line-strong bg-sunken text-fg' : 'border-transparent text-fg2 hover:bg-[var(--hover-overlay)]',
+          )}
         >
-          {asTable ? <BarChart3 aria-hidden className="size-4" /> : <Table2 aria-hidden className="size-4" />}
-          {asTable ? 'Chart' : 'Table'}
+          <Table2 aria-hidden className="size-4" />
+          Show as table
         </button>
       </div>
       {asTable ? (
@@ -256,7 +279,7 @@ export function DailyChart({ series, currency }: { series: DailySeries; currency
             const b = bars[i]
             if (!b) return null
             return (
-              <div className="flex min-w-[180px] flex-col gap-0.5">
+              <div className="flex min-w-[min(180px,100%)] flex-col gap-0.5">
                 <span className="t-body-strong text-fg">{dateOnly(b.date)}</span>
                 <TipLine label="Gross" value={m(b.gross)} />
                 <TipLine label="Refunds" value={m(b.refunds)} />
@@ -305,7 +328,7 @@ export function HourlyChart({ bars, peak, currency }: { bars: HourBar[]; peak: H
             const b = bars[i]
             if (!b) return null
             return (
-              <div className="flex min-w-[150px] flex-col gap-0.5">
+              <div className="flex min-w-[min(150px,100%)] flex-col gap-0.5">
                 <span className="t-body-strong text-fg">{hourRange(b.hour)}</span>
                 <TipLine label="Gross" value={m(b.sales)} strong />
                 <span className="t-meta text-fg3">{plural(b.orders, 'bill')}</span>

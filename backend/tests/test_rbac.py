@@ -120,6 +120,23 @@ def test_custom_role_lifecycle(as_user):
     ok(owner.delete(f"/roles/{role['id']}"), 204)
 
 
+def test_role_assigned_count_includes_deactivated_staff(as_user):
+    owner = as_user("owner")
+    role = ok(owner.post("/roles", json={"name": "Porter", "permissions": ["tables.view"]}), 201)
+    assert role["member_count"] == 0 and role["assigned_count"] == 0
+    staffer = ok(owner.post("/users", json={"username": "porty", "full_name": "Porty",
+                                            "password": "s3cure-pass",
+                                            "role_ids": [role["id"]]}), 201)
+    staffer = ok(owner.post(f"/users/{staffer['id']}/deactivate",
+                            json={"version": staffer["version"]}))
+    listed = next(r for r in ok(owner.get("/roles")) if r["id"] == role["id"])
+    assert listed["member_count"] == 0 and listed["assigned_count"] == 1
+    detail = ok(owner.get(f"/roles/{role['id']}"))
+    assert detail["member_count"] == 0 and detail["assigned_count"] == 1
+    # The deactivated holder still blocks deletion, which is what assigned_count tells clients.
+    err(owner.delete(f"/roles/{role['id']}"), 409, "CONFLICT")
+
+
 def test_unknown_permission_rejected(as_user):
     err(as_user("owner").post("/roles", json={"name": "X", "permissions": ["god.mode"]}), 422,
         "VALIDATION_ERROR")

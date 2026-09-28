@@ -1,5 +1,5 @@
-import { Ban, CheckCircle2, KeyRound, Lock, UserX } from 'lucide-react'
-import { useEffect, useId, useState } from 'react'
+import { Ban, CheckCircle2, KeyRound, Lock, RefreshCw, UserX } from 'lucide-react'
+import { useCallback, useEffect, useId, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiError } from '@/api/errors'
 import type { StaffMember } from '@/api/types'
@@ -24,23 +24,25 @@ export function lockReason(member: StaffMember, isMe: boolean): string | null {
   return null
 }
 
-export function StaffDetailDrawer({ member, onClose, onChanged, roles }: {
+export function StaffDetailDrawer({ member, onClose, onChanged, roles, rolesComplete = true }: {
   member: StaffMember | null
   onClose: () => void
   /** The server's latest copy after an action, so the drawer never shows an old version. */
   onChanged: (m: StaffMember) => void
   roles: readonly (RoleOption & { description?: string | null })[]
+  /** false when `roles` isn't the restaurant's full list (no Roles access). */
+  rolesComplete?: boolean
 }) {
   const { me, can } = useMe()
   const [rolesDirty, setRolesDirty] = useState(false)
   const [pwDirty, setPwDirty] = useState(false)
   const [busy, setBusy] = useState(false)
   const discard = useDiscardConfirm(rolesDirty || pwDirty)
-  const close = () => discard.request(() => {
-    setRolesDirty(false)
-    setPwDirty(false)
-    onClose()
-  })
+  const onDirty = useCallback((r: boolean, p: boolean) => {
+    setRolesDirty(r)
+    setPwDirty(p)
+  }, [])
+  const close = () => discard.request(onClose)
   return (
     <>
       <Drawer
@@ -52,22 +54,17 @@ export function StaffDetailDrawer({ member, onClose, onChanged, roles }: {
       >
         {member && (
           <StaffDetail
-            // A new server version resets local edits: they would be stale anyway.
-            key={`${member.id}-${member.version}`}
+            // Keyed by person only: a background refresh (new version) keeps the edits in
+            // progress, and the detail explains when someone else changed them meanwhile.
+            key={member.id}
             member={member}
             roles={roles}
+            rolesComplete={rolesComplete}
             isMe={member.id === me.id}
             can={can}
             zone={me.location.timezone}
-            onChanged={(m) => {
-              setRolesDirty(false)
-              setPwDirty(false)
-              onChanged(m)
-            }}
-            onDirty={(r, p) => {
-              setRolesDirty(r)
-              setPwDirty(p)
-            }}
+            onChanged={onChanged}
+            onDirty={onDirty}
             onBusy={setBusy}
           />
         )}
@@ -77,9 +74,10 @@ export function StaffDetailDrawer({ member, onClose, onChanged, roles }: {
   )
 }
 
-function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBusy }: {
+function StaffDetail({ member, roles, rolesComplete, isMe, can, zone, onChanged, onDirty, onBusy }: {
   member: StaffMember
   roles: readonly (RoleOption & { description?: string | null })[]
+  rolesComplete: boolean
   isMe: boolean
   can: (p: Permission) => boolean
   zone: string
@@ -88,7 +86,8 @@ function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBus
   onBusy: (b: boolean) => void
 }) {
   const original = member.roles.map((r) => r.id)
-  const [selected, setSelected] = useState<number[]>(original)
+  /** Role edits in progress, with the version they started from. null = showing the server's. */
+  const [edit, setEdit] = useState<{ ids: number[]; version: number } | null>(null)
   const [password, setPassword] = useState('')
   const [pwError, setPwError] = useState<string | null>(null)
   const [confirmActive, setConfirmActive] = useState(false)
@@ -102,28 +101,46 @@ function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBus
   const showsManagement = can(P.STAFF_UPDATE) || can(P.STAFF_DEACTIVATE)
 
   const same = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((x) => b.includes(x))
-  const rolesDirty = !same(selected, original)
+  const selected = edit?.ids ?? original
+  const rolesDirty = edit !== null && !same(edit.ids, original)
+  // Someone else saved this person while the edit was open: keep the edit, but say so. The
+  // next save goes against their version, so it's a deliberate second decision.
+  const changedMeanwhile = rolesDirty && edit.version !== member.version
+
+  // The drawer's "Discard changes?" follows what's really unsaved, including after a refresh
+  // made the edit match the server again. Cleared when this person's detail goes away.
+  useEffect(() => {
+    onDirty(rolesDirty, password.length > 0)
+  }, [rolesDirty, password, onDirty])
+  useEffect(() => () => onDirty(false, false), [onDirty])
 
   const setRoles = (ids: number[]) => {
-    setSelected(ids)
-    onDirty(!same(ids, original), password.length > 0)
+    setEdit(same(ids, original) ? null : { ids, version: edit?.version ?? member.version })
   }
+  /** After one of our own actions bumped the version, the edit continues from it. */
+  const rebase = (m: StaffMember) => setEdit((e) => (e ? { ...e, version: m.version } : e))
   const setPw = (v: string) => {
     setPassword(v)
     setPwError(null)
-    onDirty(rolesDirty, v.length > 0)
   }
 
   const saveRoles = useAction((ids: number[]) => staffApi.update(member.id, { version: member.version, role_ids: ids }), {
     invalidate: INVALIDATE,
     success: `Updated access for ${member.full_name}`,
-    onSuccess: onChanged,
+    onSuccess: (m) => {
+      setEdit(null)
+      onChanged(m)
+    },
   })
   const reset = useAction((pw: string) => staffApi.resetPassword(member.id, member.version, pw), {
     invalidate: INVALIDATE,
     success: `Password reset. ${member.full_name} is signed out everywhere.`,
     toastError: false,
-    onSuccess: onChanged,
+    onSuccess: (m) => {
+      setPassword('')
+      rebase(m)
+      onChanged(m)
+    },
     onError: (e: ApiError) => setPwError(cleanMessage(e.fields.new_password ?? e.message)),
   })
   const toggleActive = useAction((active: boolean) => staffApi.setActive(member.id, member.version, active), {
@@ -131,6 +148,7 @@ function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBus
     success: (m) => (m.is_active ? `${m.full_name} is active again` : `${m.full_name} can no longer sign in`),
     onSuccess: (m) => {
       setConfirmActive(false)
+      rebase(m)
       onChanged(m)
     },
     onError: () => setConfirmActive(false),
@@ -142,7 +160,9 @@ function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBus
   }, [pending, onBusy])
 
   const pwProblem = password ? passwordProblem(password) : null
-  const roleOptions = roles.length > 0 ? roles : member.roles.map((r) => ({ id: r.id, name: r.name, permissions: null }))
+  // Without the full role list, only this person's own roles are offered (they can be
+  // removed); offering roles seen elsewhere would pass a partial list off as the choice.
+  const roleOptions = rolesComplete && roles.length > 0 ? roles : member.roles.map((r) => ({ id: r.id, name: r.name, permissions: null }))
 
   return (
     <div className="flex flex-col pb-6">
@@ -166,8 +186,14 @@ function StaffDetail({ member, roles, isMe, can, zone, onChanged, onDirty, onBus
       <GroupLabel id={rolesLabel}>Roles</GroupLabel>
       {canRoles ? (
         <>
+          {changedMeanwhile && (
+            <Notice className="mb-3" icon={RefreshCw} tone="warning" live>
+              Someone else updated {firstName} while you were editing. Your selection is kept — review it and save again, or undo to see theirs.
+            </Notice>
+          )}
           <RolePicker options={roleOptions} value={selected} onChange={setRoles} disabled={saveRoles.isPending} labelledBy={rolesLabel} />
           {selected.length === 0 && <p className="t-meta mt-1.5 text-fg3">Everyone needs at least one role.</p>}
+          {!rolesComplete && <LockNote className="mt-1.5">Showing only {firstName}'s roles. Giving other roles needs “Roles” access.</LockNote>}
           {rolesDirty && (
             <div className="mt-3 flex gap-2">
               <Button variant="secondary" size="sm" onClick={() => setRoles(original)} disabled={saveRoles.isPending}>Undo</Button>

@@ -65,4 +65,17 @@ describe('startOfDayInZone', () => {
     // Santiago springs forward at 00:00 → 01:00 on 6 Sept 2026 (UTC−4 → UTC−3).
     expect(startOfDayInZone('2026-09-06', 'America/Santiago')).toBe('2026-09-06T04:00:00.000Z')
   })
+  it('uses the first midnight when midnight happens twice, like the backend (fold=0)', () => {
+    // Havana falls back 01:00 → 00:00 on 1 Nov 2026: midnight is at 04:00Z (CDT) and again at 05:00Z.
+    expect(startOfDayInZone('2026-11-01', 'America/Havana')).toBe('2026-11-01T04:00:00.000Z')
+    // Santiago falls back 00:00 → 23:00 on 5 Apr 2026: the day starts once, at 04:00Z.
+    expect(startOfDayInZone('2026-04-05', 'America/Santiago')).toBe('2026-04-05T04:00:00.000Z')
+    expect(startOfDayInZone('2026-04-04', 'America/Santiago')).toBe('2026-04-04T03:00:00.000Z')
+    // Casey went from +11 to +8 at 04:00 on 5 Mar 2010; that day began once, at 13:00Z the day before.
+    expect(startOfDayInZone('2010-03-05', 'Antarctica/Casey')).toBe('2010-03-04T13:00:00.000Z')
+  })
+  it('uses the first instant when midnight is skipped east of UTC', () => {
+    // Cairo springs forward 00:00 → 01:00 on 24 Apr 2026.
+    expect(startOfDayInZone('2026-04-24', 'Africa/Cairo')).toBe('2026-04-23T22:00:00.000Z')
+  })
 })

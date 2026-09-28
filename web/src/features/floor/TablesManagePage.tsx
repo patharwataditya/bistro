@@ -1,11 +1,11 @@
-import { Armchair, Check, CircleAlert, LayoutGrid, Pencil, Plus, ReceiptText, Trash2, X } from 'lucide-react'
+import { Armchair, Check, CircleAlert, EyeOff, LayoutGrid, Pencil, Plus, ReceiptText, Trash2, X } from 'lucide-react'
 import { Fragment, useState, type FormEvent } from 'react'
 import { useFloor, keys } from '@/api/queries'
 import type { Area, DiningTable } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
 import { useAction } from '@/features/common/useAction'
-import { cleanMessage, Notice, rowProps, TableSkeleton } from '@/features/staff/manage-kit'
+import { cleanMessage, Notice, RowOpen, rowProps, TableSkeleton } from '@/features/staff/manage-kit'
 import { plural } from '@/lib/format'
 import { Button, IconButton } from '@/ui/Button'
 import { Card } from '@/ui/Card'
@@ -20,6 +20,27 @@ import { groupByArea, tablesApi } from './TablesManageApi'
 import { TablesManageDrawer, type TableEditor } from './TablesManageDrawer'
 
 export default function TablesManagePage() {
+  const { can } = useMe()
+  // Managing tables still means reading the floor (GET /tables needs tables.view). A role with
+  // only create/update/delete gets an explanation instead of a raw "not allowed" error.
+  if (!can(P.TABLES_VIEW)) {
+    return (
+      <div className="mx-auto max-w-[1400px]">
+        <PageHeader title="Tables & areas" subtitle="Floor layout" />
+        <Card>
+          <EmptyState
+            icon={EyeOff}
+            title="You can't see the tables"
+            message="Your role can change tables, but not view them, so there's nothing to show here. Ask a manager to add “Tables – View” to your role."
+          />
+        </Card>
+      </div>
+    )
+  }
+  return <TablesManage />
+}
+
+function TablesManage() {
   const { can } = useMe()
   const floor = useFloor(30_000)
   const [editor, setEditor] = useState<TableEditor | null>(null)
@@ -97,9 +118,15 @@ export default function TablesManagePage() {
 function TableRow({ table, onOpen }: { table: DiningTable; onOpen: (() => void) | null }) {
   const v = tableVisual(table.status)
   return (
-    <Tr {...(onOpen ? rowProps(onOpen, `Edit table ${table.name}`) : {})}>
+    <Tr {...(onOpen ? rowProps(onOpen) : {})}>
       <Td className="w-full">
-        <span className="t-card-title text-fg">{table.name}</span>
+        {onOpen ? (
+          <RowOpen onOpen={onOpen}>
+            <span className="t-card-title text-fg"><span className="sr-only">Table </span>{table.name}</span>
+          </RowOpen>
+        ) : (
+          <span className="t-card-title text-fg">{table.name}</span>
+        )}
       </Td>
       <Td className="text-right whitespace-nowrap">
         <span className="inline-flex items-center gap-1.5 tabular-nums text-fg2">

@@ -77,6 +77,7 @@ function GroupRow({ group, selected, editable, grants, onChange }: {
         {group.cells.map((cell) => (
           <Cell
             key={cell.code}
+            group={group.group}
             cell={cell}
             checked={selected.has(cell.code)}
             editable={editable}
@@ -94,7 +95,8 @@ function GroupRow({ group, selected, editable, grants, onChange }: {
   )
 }
 
-function Cell({ cell, checked, editable, grantable, onToggle }: {
+function Cell({ group, cell, checked, editable, grantable, onToggle }: {
+  group: string
   cell: PermissionCell
   checked: boolean
   editable: boolean
@@ -119,7 +121,8 @@ function Cell({ cell, checked, editable, grantable, onToggle }: {
         className="mt-0.5"
         checked={checked}
         disabled={!enabled}
-        label={cell.label}
+        // "Orders – Cancel", not just "Cancel": several groups share the same action names.
+        label={`${group} – ${cell.label}`}
         describedBy={`${id}-d`}
         onChange={onToggle}
       />

@@ -265,6 +265,7 @@ def to_role_out(actor: Actor, role: Role, members: list[User]) -> RoleOut:
         id=role.id, name=role.name, description=role.description, is_system=role.is_system,
         permissions=sorted(role.permission_codes),
         member_count=sum(1 for m in members if m.is_active),
+        assigned_count=len(members),
         version=role.version, editable=role_editable(actor, role, members),
     )
 

@@ -1,5 +1,6 @@
-import { CalendarRange, ChartLine } from 'lucide-react'
+import { CalendarRange, ChartLine, CircleAlert } from 'lucide-react'
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router'
 import { useReport } from '@/api/queries'
 import type { Report } from '@/api/types'
@@ -13,28 +14,24 @@ import { TextField } from '@/ui/Field'
 import { PageHeader } from '@/ui/Page'
 import { EmptyState, ErrorState, Skeleton, StaleBanner } from '@/ui/States'
 import { DataTable, Td, Th, Tr } from '@/ui/Table'
-import { breakdownRows, dailySeries, hourlySeries, isEmptyReport, tableRows, topSellerRows } from './chartData'
+import { averageMinutes, breakdownRows, dailySeries, hourlySeries, isEmptyReport, tableRows, topSellerRows } from './chartData'
 import { DailyChart, HourlyChart, RankList } from './charts'
+import { parseReportParams, type Choice } from './params'
 import { PRESETS, PRESET_LABEL, presetRangeInZone, rangeError, rangeLabel, type DateRange, type Preset } from './range'
+import { serverNow } from './serverClock'
 
-type Choice = Preset | 'custom'
 const CHOICES: readonly Choice[] = [...PRESETS, 'custom']
-
-function isPreset(v: string | null): v is Preset {
-  return v !== null && (PRESETS as readonly string[]).includes(v)
-}
 
 /** The selected range lives in the URL, so a report can be bookmarked or shared. */
 function useRange(zone: string) {
   const [params, setParams] = useSearchParams()
-  const start = params.get('start') ?? ''
-  const end = params.get('end') ?? ''
-  const preset = params.get('range')
-  const custom = !isPreset(preset) && start !== '' && rangeError(start, end) === null
-  const choice: Choice = custom ? 'custom' : isPreset(preset) ? preset : 'today'
-  const range: DateRange = custom ? { start, end } : presetRangeInZone(choice as Preset, zone)
+  const parsed = useMemo(() => parseReportParams(params), [params])
+  // Restaurant "today" on the server's clock where one is known (see serverClockOffset).
+  const now = serverNow(useQueryClient())
+  const range: DateRange = parsed.custom ?? presetRangeInZone(parsed.choice as Preset, zone, now)
   return {
-    choice,
+    choice: parsed.choice,
+    problem: parsed.problem,
     range,
     selectPreset: (p: Preset) => setParams(p === 'today' ? {} : { range: p }, { replace: true }),
     selectCustom: (r: DateRange) => setParams({ start: r.start, end: r.end }, { replace: true }),
@@ -44,8 +41,8 @@ function useRange(zone: string) {
 export default function ReportsPage() {
   const { me } = useMe()
   const zone = me.location.timezone
-  const { choice, range, selectPreset, selectCustom } = useRange(zone)
-  const [customOpen, setCustomOpen] = useState(choice === 'custom')
+  const { choice, problem, range, selectPreset, selectCustom } = useRange(zone)
+  const [customOpen, setCustomOpen] = useState(choice === 'custom' || problem !== null)
   const query = useReport(range.start, range.end)
   const report = query.data
   const showCustom = customOpen || choice === 'custom'
@@ -75,7 +72,14 @@ export default function ReportsPage() {
             {rangeLabel(range)}
           </p>
         </div>
-        {showCustom && <CustomRange initial={range} onApply={selectCustom} />}
+        {showCustom && (
+          <CustomRange
+            key={problem ? 'problem' : 'normal'}
+            initial={problem?.draft ?? range}
+            notice={problem?.message ?? null}
+            onApply={selectCustom}
+          />
+        )}
       </div>
 
       {query.isError && report && <StaleBanner error={query.error} />}
@@ -91,10 +95,11 @@ export default function ReportsPage() {
   )
 }
 
-function CustomRange({ initial, onApply }: { initial: DateRange; onApply: (r: DateRange) => void }) {
+function CustomRange({ initial, notice, onApply }: { initial: DateRange; notice: string | null; onApply: (r: DateRange) => void }) {
   const [start, setStart] = useState(initial.start)
   const [end, setEnd] = useState(initial.end)
-  const [touched, setTouched] = useState(false)
+  // A link with unusable dates shows why straight away.
+  const [touched, setTouched] = useState(notice !== null)
   const error = rangeError(start, end)
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -102,11 +107,19 @@ function CustomRange({ initial, onApply }: { initial: DateRange; onApply: (r: Da
     if (!error) onApply({ start, end })
   }
   return (
-    <form onSubmit={submit} noValidate className="flex flex-wrap items-start gap-3 rounded-[var(--radius-lg)] border border-line bg-surface p-4">
-      <TextField label="From" type="date" value={start} min="2000-01-01" max="2100-12-31" onChange={(e) => setStart(e.target.value)} wrapperClassName="w-[180px]" />
-      <TextField label="To" type="date" value={end} min="2000-01-01" max="2100-12-31" onChange={(e) => setEnd(e.target.value)} wrapperClassName="w-[180px]"
-        error={touched ? error : null} hint={touched ? undefined : 'Up to 366 days'} />
-      <Button type="submit" variant="primary" className="mt-[22px]">Show report</Button>
+    <form onSubmit={submit} noValidate className="flex flex-col gap-3 rounded-[var(--radius-lg)] border border-line bg-surface p-4">
+      {notice && (
+        <p role="alert" className="t-support flex items-start gap-2 rounded-[var(--radius-md)] bg-warning-soft px-3 py-2 text-warning">
+          <CircleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          {notice}
+        </p>
+      )}
+      <div className="flex flex-wrap items-start gap-3">
+        <TextField label="From" type="date" value={start} min="2000-01-01" max="2100-12-31" onChange={(e) => setStart(e.target.value)} wrapperClassName="w-[180px]" />
+        <TextField label="To" type="date" value={end} min="2000-01-01" max="2100-12-31" onChange={(e) => setEnd(e.target.value)} wrapperClassName="w-[180px]"
+          error={touched ? error : null} hint={touched ? undefined : 'Up to 366 days'} />
+        <Button type="submit" variant="primary" className="mt-[22px]">Show report</Button>
+      </div>
     </form>
   )
 }
@@ -115,8 +128,10 @@ function ReportSkeleton() {
   return (
     <div role="status" aria-label="Loading report" className="grid grid-cols-12 gap-4">
       <Skeleton className="col-span-12 h-[168px] xl:col-span-5" />
-      <div className="col-span-12 grid grid-cols-2 gap-4 sm:grid-cols-4 xl:col-span-7">
-        {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-[76px]" />)}
+      <div className="@container col-span-12 xl:col-span-7">
+        <div className="grid grid-cols-2 gap-3 @[52rem]:grid-cols-4">
+            {Array.from({ length: 8 }, (_, i) => <Skeleton key={i} className="h-[76px]" />)}
+        </div>
       </div>
       <Skeleton className="col-span-12 h-[260px]" />
       <Skeleton className="col-span-12 h-[220px] lg:col-span-6" />
@@ -146,25 +161,28 @@ function ReportContent({ report: r }: { report: Report }) {
         <dl className="grid grid-cols-2 gap-4 border-t border-current/15 pt-4">
           <div>
             <dt className="t-meta opacity-70">Gross sales</dt>
-            <dd className="t-amount mt-0.5">{m(r.gross_sales)}</dd>
+            <dd className="t-amount mt-0.5 [overflow-wrap:anywhere]">{m(r.gross_sales)}</dd>
           </div>
           <div>
             <dt className="t-meta opacity-70">Refunds</dt>
-            <dd className="t-amount mt-0.5">{m(r.refunds)}</dd>
+            <dd className="t-amount mt-0.5 [overflow-wrap:anywhere]">{m(r.refunds)}</dd>
           </div>
         </dl>
       </section>
 
-      <dl className="col-span-12 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:col-span-7">
-        <Kpi label="Bills" value={String(r.order_count)} caption="settled" />
-        <Kpi label="Average bill" value={m(r.average_order_value)} caption="gross ÷ bills" />
-        <Kpi label="Guests" value={String(r.guests)} caption="on settled bills" />
-        <Kpi label="Discounts" value={m(r.discounts_total)} caption={plural(r.discounted_bills, 'bill')} />
-        <Kpi label="Cancelled" value={String(r.cancelled_orders)} caption={r.cancelled_orders === 1 ? 'order' : 'orders'} />
-        <Kpi label="Voided items" value={m(r.voided_items_value)} caption="value at menu price" />
-        <Kpi label="Taxes" value={m(r.tax_total)} caption="collected" />
-        <Kpi label="Service charge" value={m(r.service_charge_total)} caption="collected" />
-      </dl>
+      {/* Four across only when each tile has room for a full amount; money never truncates. */}
+      <div className="@container col-span-12 xl:col-span-7">
+        <dl className="grid grid-cols-2 gap-3 @[52rem]:grid-cols-4">
+          <Kpi label="Bills" value={String(r.order_count)} caption="settled" />
+          <Kpi label="Average bill" value={m(r.average_order_value)} caption="gross ÷ bills" />
+          <Kpi label="Guests" value={String(r.guests)} caption="on settled bills" />
+          <Kpi label="Discounts" value={m(r.discounts_total)} caption={plural(r.discounted_bills, 'bill')} />
+          <Kpi label="Cancelled" value={String(r.cancelled_orders)} caption={r.cancelled_orders === 1 ? 'order' : 'orders'} />
+          <Kpi label="Voided items" value={m(r.voided_items_value)} caption="value at menu price" />
+          <Kpi label="Taxes" value={m(r.tax_total)} caption="collected" />
+          <Kpi label="Service charge" value={m(r.service_charge_total)} caption="collected" />
+        </dl>
+      </div>
 
       {empty ? (
         <Card flat className="col-span-12">
@@ -210,7 +228,7 @@ function ReportContent({ report: r }: { report: Report }) {
                     <Tr key={t.table_name}>
                       <Td className="t-body-strong">{t.table_name}</Td>
                       <Td className="text-right tabular-nums">{t.orders}</Td>
-                      <Td className="text-right tabular-nums">{t.average_minutes} min</Td>
+                      <Td className="text-right tabular-nums">{averageMinutes(t.average_minutes)}</Td>
                       <Td className="text-right">
                         <div className="flex items-center justify-end gap-3">
                           <span aria-hidden className="hidden h-1.5 w-20 overflow-hidden rounded-full bg-sunken sm:block">
@@ -241,7 +259,8 @@ function Kpi({ label, value, caption }: { label: string; value: string; caption?
   return (
     <div className="flex min-w-0 flex-col rounded-[var(--radius-lg)] border border-line bg-surface px-4 py-3">
       <dt className="t-status text-fg3">{label}</dt>
-      <dd className="t-amount-lg truncate text-fg" title={value}>{value}</dd>
+      {/* Long amounts step down a size, then wrap; they are never cut off. */}
+      <dd className={cn('t-amount-lg text-fg [overflow-wrap:anywhere]', value.length > 11 && 'text-[18px] leading-[24px]')}>{value}</dd>
       {caption && <dd className="t-meta text-fg2">{caption}</dd>}
     </div>
   )

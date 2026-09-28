@@ -1,6 +1,6 @@
 /** Audit log filters: the chip set, and how the screen's filter state maps onto the API query. */
 import type { AuditFilter } from '@/api/queries'
-import { addDays, isIsoDate, startOfDayInZone } from '@/features/reports/range'
+import { addDays, EARLIEST_DATE, isIsoDate, LATEST_DATE, startOfDayInZone } from '@/features/reports/range'
 
 export interface AuditChip {
   key: string
@@ -20,7 +20,6 @@ export const AUDIT_CHIPS: readonly AuditChip[] = [
   { key: 'settings', label: 'Settings', prefix: 'settings.' },
   { key: 'tables', label: 'Tables', prefix: 'table.' },
   { key: 'areas', label: 'Areas', prefix: 'area.' },
-  { key: 'kitchen', label: 'Kitchen', prefix: 'kitchen.' },
 ]
 
 export function chipByKey(key: string | null): AuditChip {
@@ -35,9 +34,25 @@ export interface AuditScreenFilter {
   to: string
 }
 
+/** A problem with one date filter ('' = no date, which is fine), or null. */
+export function dateError(date: string): string | null {
+  if (!date) return null
+  if (!isIsoDate(date)) return 'Enter a valid date'
+  if (date < EARLIEST_DATE || date > LATEST_DATE) return 'Choose a date between 2000 and 2100'
+  return null
+}
+
+/**
+ * Whether a date field's value can be applied as it is typed. Typing a year digit by digit
+ * passes through years like 0002 and 0020; those wait for the field to be left.
+ */
+export function isCommittableDate(date: string): boolean {
+  return date === '' || dateError(date) === null
+}
+
 export function dateRangeError(from: string, to: string): string | null {
-  if (from && !isIsoDate(from)) return 'Enter a valid date'
-  if (to && !isIsoDate(to)) return 'Enter a valid date'
+  const own = dateError(from) ?? dateError(to)
+  if (own) return own
   if (from && to && to < from) return 'The end date is before the start date'
   return null
 }

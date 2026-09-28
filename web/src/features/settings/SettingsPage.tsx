@@ -1,9 +1,9 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQueryClient } from '@tanstack/react-query'
 import { Info, Lock, Plus, Trash2 } from 'lucide-react'
-import { useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Controller, useFieldArray, useForm, useWatch, type FieldPath } from 'react-hook-form'
-import { ApiError } from '@/api/errors'
+import type { ApiError } from '@/api/errors'
 import { keys } from '@/api/queries'
 import type { RestaurantSettings } from '@/api/types'
 import { ALL_PERMISSIONS, P } from '@/auth/permissions'
@@ -20,21 +20,15 @@ import { ErrorState, Skeleton, StaleBanner } from '@/ui/States'
 import { useToast } from '@/ui/Toast'
 import { patchSettings, putTaxRates, useSettingsLive } from './api'
 import { PaymentMethodsSection } from './PaymentMethods'
+import { adoptsFreshData, PartialSave, saveFailureMessage, saveSettings } from './saveSettings'
 import {
-  acceptPercent, AFTER_PAYMENT, affectsProfile, formFieldFor, formFromSettings, generalDiff, isDirty, MAX_TAXES,
-  ROUNDING_OPTIONS, settingsSchema, taxesBody, taxesChanged, type SettingsValues, type TaxDraft,
+  acceptPercent, AFTER_PAYMENT, affectsProfile, formFieldFor, formFromSettings, isDirty, MAX_TAXES,
+  ROUNDING_OPTIONS, settingsSchema, type SettingsValues, type TaxDraft,
 } from './settingsForm'
 
 const EMPTY: SettingsValues = {
   restaurant_name: '', location_name: '', address: '', timezone: '', currency_code: '', service_charge_percent: '',
   service_charge_taxable: false, rounding_increment: '0.01', bill_prefix: '', status_after_payment: 'AVAILABLE', taxes: [],
-}
-
-/** Thrown when the general part saved but the tax table then failed: keep what landed. */
-class PartialSave extends Error {
-  constructor(readonly saved: RestaurantSettings, readonly error: ApiError) {
-    super(error.message)
-  }
 }
 
 function timeZones(): string[] {
@@ -69,23 +63,16 @@ export default function SettingsPage() {
   const keepTaxes = useRef<TaxDraft[] | null>(null)
   const dirty = base !== null && isDirty(base, { ...EMPTY, ...values, taxes: values.taxes ?? [] })
 
-  const save = useAction(async ({ start, v }: { start: RestaurantSettings; v: SettingsValues }) => {
-    let current = start
-    const changes = generalDiff(start, v)
-    if (Object.keys(changes).length > 0) current = await patchSettings({ version: current.version, ...changes })
-    if (taxesChanged(start, v.taxes)) {
-      try {
-        current = await putTaxRates({ version: current.version, tax_rates: taxesBody(v.taxes) })
-      } catch (e) {
-        if (current !== start && e instanceof ApiError) throw new PartialSave(current, e)
-        throw e
-      }
-    }
-    return current
-  }, { toastError: false })
+  const save = useAction(({ start, v }: { start: RestaurantSettings; v: SettingsValues }) =>
+    saveSettings(start, v, { patch: patchSettings, putTaxes: putTaxRates }), { toastError: false })
+  // Save failures are shown once, inline above the form; bring that into view.
+  const errorRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (generalError) errorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [generalError])
 
   // Adopt fresh server data as the baseline whenever nothing is being edited.
-  if (query.data && query.data !== base && !dirty && !save.isPending) setBase(query.data)
+  if (adoptsFreshData(query.data, base, dirty, save.isPending)) setBase(query.data)
 
   useLayoutEffect(() => {
     if (!base) return
@@ -137,17 +124,11 @@ export default function SettingsPage() {
           if (affectsProfile(start, e.saved)) void reloadProfile()
         }
         if (err.kind === 'stale') {
-          toast.error('Someone else changed these settings. Their version is shown now — make your changes again.')
+          setGeneralError(saveFailureMessage(e, null))
           void query.refetch().then((r) => r.data && setBase(r.data))
           return
         }
-        const message = placeErrors(err)
-        if (e instanceof PartialSave) {
-          toast.error(`General settings saved, but the taxes weren't: ${err.message}`)
-        } else if (message) {
-          toast.error(message)
-        }
-        setGeneralError(message)
+        setGeneralError(saveFailureMessage(e, placeErrors(err)))
       },
     })
   }
@@ -185,7 +166,7 @@ export default function SettingsPage() {
           {!canEdit && (
             <Notice icon={Lock} tone="info">You can view settings but not change them. Ask a manager with settings access.</Notice>
           )}
-          {generalError && <Notice tone="danger" icon={Info} live>{generalError}</Notice>}
+          {generalError && <div ref={errorRef} className="scroll-mt-24"><Notice tone="danger" icon={Info} live>{generalError}</Notice></div>}
 
           <SettingsCard title="Restaurant" subtitle="Name, place and money">
             <TextField

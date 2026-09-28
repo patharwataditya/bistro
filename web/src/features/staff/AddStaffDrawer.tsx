@@ -29,10 +29,12 @@ const schema = z.object({
 type Form = z.infer<typeof schema>
 const FIELDS = ['full_name', 'username', 'password', 'role_ids'] as const
 
-export function AddStaffDrawer({ open, onClose, roles }: {
+export function AddStaffDrawer({ open, onClose, roles, rolesComplete = true }: {
   open: boolean
   onClose: () => void
   roles: readonly (RoleOption & { description?: string | null })[]
+  /** false when `roles` is only what's visible on the staff list (no Roles access). */
+  rolesComplete?: boolean
 }) {
   const [general, setGeneral] = useState<string | null>(null)
   const rolesLabel = useId()
@@ -44,7 +46,8 @@ export function AddStaffDrawer({ open, onClose, roles }: {
   const { register, handleSubmit, control, formState, reset, setError } = form
   const password = useWatch({ control, name: 'password' })
   const create = useAction(staffApi.create, {
-    invalidate: [['users']],
+    // Roles too: their member counts just changed.
+    invalidate: [['users'], ['roles']],
     success: (m) => `${m.full_name} can sign in now`,
     toastError: false,
     onSuccess: () => {
@@ -106,8 +109,13 @@ export function AddStaffDrawer({ open, onClose, roles }: {
           />
           <div>
             <GroupLabel id={rolesLabel}>Roles</GroupLabel>
+            {!rolesComplete && roles.length > 0 && (
+              <p className="t-meta mb-2 text-fg3">Showing roles already held by people on the staff list. The full list needs “Roles” access.</p>
+            )}
             {roles.length === 0 ? (
-              <Notice icon={UserPlus}>No roles are available to assign. Create a role first.</Notice>
+              <Notice icon={UserPlus}>
+                {rolesComplete ? 'No roles are available to assign. Create a role first.' : 'No roles to show. Choosing roles needs “Roles” access — ask a manager who has it.'}
+              </Notice>
             ) : (
               <Controller
                 control={control}

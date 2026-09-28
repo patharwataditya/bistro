@@ -96,10 +96,14 @@ export interface RankRow {
   share: number | null
 }
 
-/** Top sellers: bar length by quantity (the API ranks by quantity). */
+/**
+ * Top sellers: bar length by quantity (the API ranks by quantity). The API groups by menu item
+ * *and* the name snapshotted on the order line, so a renamed item appears once per name: the
+ * key needs both.
+ */
 export function topSellerRows(items: readonly TopItem[]): RankRow[] {
   const max = Math.max(1, ...items.map((i) => i.quantity))
-  return items.map((i) => ({ key: String(i.menu_item_id), name: i.name, count: i.quantity, amount: i.revenue, ratio: i.quantity / max, share: null }))
+  return items.map((i) => ({ key: `${i.menu_item_id}|${i.name}`, name: i.name, count: i.quantity, amount: i.revenue, ratio: i.quantity / max, share: null }))
 }
 
 /**
@@ -113,6 +117,11 @@ export function breakdownRows(rows: readonly Named[]): RankRow[] {
     const share = total > 0 ? Math.max(0, magnitude(r.amount)) / total : 0
     return { key: r.name, name: r.name, count: r.count, amount: r.amount, ratio: share, share: Math.round(share * 100) }
   })
+}
+
+/** "42 min", or "—" when there is no finished check to time (open checks report 0). */
+export function averageMinutes(minutes: number | null | undefined): string {
+  return minutes ? `${Math.round(minutes)} min` : '—'
 }
 
 /** Tables by revenue, highest first, with a bar relative to the best table. */

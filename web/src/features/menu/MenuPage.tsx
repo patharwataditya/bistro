@@ -1,12 +1,9 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { BookOpen, CircleCheck, CircleMinus, FolderTree, LayoutList, Plus, SearchX } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { keys } from '@/api/queries'
-import type { Menu, MenuItem } from '@/api/types'
+import type { MenuItem } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
-import { useAction } from '@/features/common/useAction'
-import { rowProps, SearchInput, TableSkeleton, Toolbar } from '@/features/staff/manage-kit'
+import { RowOpen, rowProps, SearchInput, TableSkeleton, Toolbar } from '@/features/staff/manage-kit'
 import { money } from '@/lib/format'
 import { Button } from '@/ui/Button'
 import { StatusChip } from '@/ui/Chip'
@@ -15,10 +12,11 @@ import { ChipRow, Switch } from '@/ui/Controls'
 import { PageHeader } from '@/ui/Page'
 import { EmptyState, ErrorState, StaleBanner } from '@/ui/States'
 import { DataTable, Td, Th, Tr } from '@/ui/Table'
-import { menuApi, useMenuManage } from './api'
+import { useMenuManage } from './api'
 import { MenuCategoriesDrawer } from './MenuCategoriesDrawer'
 import { MenuItemDrawer, type ItemEditor } from './MenuItemDrawer'
 import { matchesQuery } from './menuForm'
+import { useAvailability } from './useAvailability'
 
 type CategoryFilter = number | 'all'
 
@@ -184,13 +182,16 @@ function ItemsTable({ items, categoryName, showCategory, onOpen }: {
       </thead>
       <tbody>
         {items.map((item) => {
-          const interactive = onOpen ? rowProps(() => onOpen(item), `Edit ${item.name}`) : null
+          const open = onOpen ? () => onOpen(item) : null
+          const name = (
+            <>
+              <span className={cn('t-body-strong block truncate', item.is_available ? 'text-fg' : 'text-fg2')}>{item.name}</span>
+              {item.description && <span className="t-support block truncate text-fg3">{item.description}</span>}
+            </>
+          )
           return (
-            <Tr key={item.id} {...(interactive ?? {})}>
-              <Td className="max-w-0 w-full">
-                <div className={cn('t-body-strong truncate', item.is_available ? 'text-fg' : 'text-fg2')}>{item.name}</div>
-                {item.description && <div className="t-support truncate text-fg3">{item.description}</div>}
-              </Td>
+            <Tr key={item.id} {...(open ? rowProps(open) : {})}>
+              <Td className="max-w-0 w-full">{open ? <RowOpen onOpen={open}>{name}</RowOpen> : name}</Td>
               {showCategory && <Td className="hidden whitespace-nowrap text-fg2 md:table-cell">{categoryName(item.category_id)}</Td>}
               <Td className="t-amount text-right whitespace-nowrap">{money(item.price, currency)}</Td>
               <Td onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()} className="cursor-default">
@@ -218,41 +219,4 @@ function ItemsTable({ items, categoryName, showCategory, onOpen }: {
       </tbody>
     </DataTable>
   )
-}
-
-/**
- * Sold-out toggle: applied to the cached menu at once, confirmed by the server, rolled back if
- * refused. A stale version refetches instead (someone else changed the item). One request per
- * item at a time.
- */
-function useAvailability() {
-  const queryClient = useQueryClient()
-  const [busy, setBusy] = useState<ReadonlySet<number>>(new Set())
-  const action = useAction((v: { item: MenuItem; available: boolean }) => menuApi.setAvailability(v.item.id, v.item.version, v.available), {
-    invalidate: [keys.menu],
-    success: (r) => (r.is_available ? `${r.name} is back on` : `${r.name} marked sold out`),
-  })
-
-  const patch = (id: number, fn: (i: MenuItem) => MenuItem) =>
-    queryClient.setQueryData<Menu>(keys.menu, (m) => (m ? { ...m, items: m.items.map((i) => (i.id === id ? fn(i) : i)) } : m))
-
-  const toggle = (item: MenuItem, available: boolean) => {
-    if (busy.has(item.id)) return
-    setBusy((s) => new Set(s).add(item.id))
-    void queryClient.cancelQueries({ queryKey: keys.menu })
-    patch(item.id, (i) => ({ ...i, is_available: available }))
-    action
-      .mutateAsync({ item, available })
-      .then((updated) => patch(item.id, () => updated))
-      .catch((e: unknown) => {
-        const stale = typeof e === 'object' && e !== null && 'kind' in e && (e as { kind: string }).kind === 'stale'
-        if (!stale) patch(item.id, (i) => ({ ...i, is_available: item.is_available }))
-      })
-      .finally(() => setBusy((s) => {
-        const next = new Set(s)
-        next.delete(item.id)
-        return next
-      }))
-  }
-  return { busy, toggle }
 }

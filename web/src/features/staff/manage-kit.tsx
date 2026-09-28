@@ -154,30 +154,56 @@ export function Checkbox({ checked, onChange, disabled, label, id, describedBy, 
 /* ------------------------------------------------------------------ table rows */
 
 /**
- * Keyboard access for clickable DataTable rows: rows are focusable, Enter/Space opens,
- * ArrowUp/ArrowDown move between rows (roving within the same tbody).
+ * Clickable DataTable rows. The whole row opens on click, but the keyboard/screen-reader
+ * control is a real button in the primary cell (`RowOpen`), so the row keeps its cell
+ * semantics and is read with its contents. Pass the returned props to the <tr>.
  */
-export function rowProps(onOpen: () => void, label: string) {
+export function rowProps(onOpen: () => void) {
   return {
-    tabIndex: 0,
-    'aria-label': label,
     onClick: onOpen,
-    onKeyDown: (e: KeyboardEvent<HTMLTableRowElement>) => {
-      if (e.target !== e.currentTarget) return
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault()
-        onOpen()
-      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault()
-        // Skip non-focusable rows (group headers) on the way.
-        const step = (el: Element | null) => (e.key === 'ArrowDown' ? el?.nextElementSibling : el?.previousElementSibling) ?? null
-        let sib = step(e.currentTarget)
-        while (sib && !(sib instanceof HTMLElement && sib.tabIndex >= 0)) sib = step(sib)
-        if (sib instanceof HTMLElement) sib.focus()
-      }
-    },
-    className: 'cursor-pointer outline-none transition-colors hover:bg-sunken/60 focus-visible:bg-sunken/60 focus-visible:shadow-[inset_3px_0_0_var(--accent)]',
+    className: cn(
+      'cursor-pointer transition-colors hover:bg-sunken/60',
+      'has-[[data-row-open]:focus-visible]:bg-sunken/60 has-[[data-row-open]:focus-visible]:shadow-[inset_3px_0_0_var(--accent)]',
+    ),
   }
+}
+
+/**
+ * The primary cell's content as the row's button: Enter/Space open it (native button), and
+ * ArrowUp/ArrowDown move to the neighbouring row's button. Put phrasing content inside
+ * (spans, not divs).
+ */
+export function RowOpen({ onOpen, children, className, describedBy }: {
+  onOpen: () => void
+  children: ReactNode
+  className?: string
+  /** Extra context for screen readers (e.g. the id of a status cell). */
+  describedBy?: string
+}) {
+  return (
+    <button
+      type="button"
+      data-row-open=""
+      aria-describedby={describedBy}
+      onClick={(e) => {
+        e.stopPropagation()
+        onOpen()
+      }}
+      onKeyDown={(e: KeyboardEvent<HTMLButtonElement>) => {
+        if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+        e.preventDefault()
+        const step = (el: Element | null) => (e.key === 'ArrowDown' ? el?.nextElementSibling : el?.previousElementSibling) ?? null
+        // Skip rows without a button (group headers) on the way.
+        let row = step(e.currentTarget.closest('tr'))
+        while (row && !row.querySelector('[data-row-open]')) row = step(row)
+        const next = row?.querySelector('[data-row-open]')
+        if (next instanceof HTMLElement) next.focus()
+      }}
+      className={cn('block w-full min-w-0 cursor-pointer rounded-[var(--radius-xs)] text-left outline-none', className)}
+    >
+      {children}
+    </button>
+  )
 }
 
 export function TableSkeleton({ rows = 6, cols = 4 }: { rows?: number; cols?: number }) {
@@ -304,10 +330,14 @@ export function useDiscardConfirm(dirty: boolean) {
   return { request, dialog }
 }
 
-/** Pinned footer inside a drawer: secondary : primary = 1 : 1.4. */
-export function DrawerActions({ secondary, primary }: { secondary?: ReactNode; primary: ReactNode }) {
+/**
+ * Pinned footer inside a drawer: secondary : primary = 1 : 1.4. `leading` (e.g. a Remove
+ * button) sits first at its natural width, so Cancel stays available next to it.
+ */
+export function DrawerActions({ secondary, primary, leading }: { secondary?: ReactNode; primary: ReactNode; leading?: ReactNode }) {
   return (
     <div className="flex gap-3">
+      {leading && <div className="flex shrink-0">{leading}</div>}
       {secondary && <div className="flex flex-[1] [&>*]:w-full">{secondary}</div>}
       <div className="flex flex-[1.4] [&>*]:w-full">{primary}</div>
     </div>

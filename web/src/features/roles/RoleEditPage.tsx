@@ -19,7 +19,7 @@ import { PageHeader } from '@/ui/Page'
 import { ErrorState, Skeleton, StaleBanner } from '@/ui/States'
 import { cleanMessage, Notice, SaveBar, useUnsavedGuard } from '@/features/staff/manage-kit'
 import { rolesApi, usePermissionCatalog, useRolesLive } from './api'
-import { diffRole, formOf, formsEqual, groupPermissions, readOnlyReason, type RoleForm } from './matrix'
+import { deleteRoleCopy, diffRole, formOf, formsEqual, groupPermissions, readOnlyReason, type RoleForm } from './matrix'
 import { PermissionMatrix } from './PermissionMatrix'
 
 interface Edit {
@@ -133,6 +133,8 @@ export default function RoleEditPage() {
   }
 
   const canDelete = !isNew && base !== null && can(P.ROLES_DELETE) && editable && !base.is_system
+  // Wording and lock from the freshest counts (someone may have reassigned people meanwhile).
+  const deleteCopy = deleteRoleCopy(fresh ?? base ?? { member_count: 0, assigned_count: 0 })
   const nameId = useId()
 
   const loading = catalog.isPending || (!isNew && roles.isPending)
@@ -227,12 +229,11 @@ export default function RoleEditPage() {
           open={confirmDelete}
           onOpenChange={setConfirmDelete}
           title={`Delete ${base.name}?`}
-          message={base.member_count > 0
-            ? `${base.member_count} ${base.member_count === 1 ? 'person has' : 'people have'} this role. Move them to another role first, or the delete will be refused.`
-            : 'The role is removed for good. This is recorded in the audit log.'}
+          message={deleteCopy.message}
           confirmLabel="Delete role"
           destructive
           loading={remove.isPending}
+          confirmDisabled={deleteCopy.blocked}
           onConfirm={() => remove.mutate(base.id)}
         />
       )}

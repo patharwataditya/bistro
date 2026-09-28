@@ -1,10 +1,10 @@
 import { ArrowUpRight, ChefHat, ChevronRight, ClipboardList, LayoutDashboard, ReceiptText, UtensilsCrossed, type LucideIcon } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { Link } from 'react-router'
 import { useDashboard } from '@/api/queries'
 import type { Dashboard } from '@/api/types'
 import { P } from '@/auth/permissions'
-import { useMe } from '@/auth/session'
+import { useMe, useSession } from '@/auth/session'
 import { dateTime, minutesSince, money, plural, relative } from '@/lib/format'
 import { useServerNow } from '@/lib/live'
 import { Card } from '@/ui/Card'
@@ -21,9 +21,16 @@ type Tables = NonNullable<Dashboard['tables']>
 
 export default function DashboardPage() {
   const { me } = useMe()
+  const { reloadProfile } = useSession()
   const query = useDashboard()
   const d = query.data
   const zone = me.location.timezone
+  // A 403 means this person's access changed since sign-in: refresh the profile (the route gate
+  // and navigation follow it) and stop showing figures they may no longer see.
+  const forbidden = query.error?.kind === 'forbidden'
+  useEffect(() => {
+    if (forbidden) void reloadProfile()
+  }, [forbidden, reloadProfile])
 
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-5">
@@ -32,8 +39,10 @@ export default function DashboardPage() {
         title={greeting(me.full_name, zone)}
         subtitle={d ? `${longDate(d.business_date)} · ${me.location.name}` : me.location.name}
       />
-      {query.isError && d && <StaleBanner error={query.error} />}
-      {!d ? (
+      {query.isError && d && !forbidden && <StaleBanner error={query.error} />}
+      {forbidden && query.error ? (
+        <ErrorState error={query.error} />
+      ) : !d ? (
         query.isError ? <ErrorState error={query.error} onRetry={() => void query.refetch()} /> : <DashboardSkeleton />
       ) : (
         <DashboardContent d={d} />
@@ -144,7 +153,7 @@ function DashboardContent({ d }: { d: Dashboard }) {
           </div>
           {d.recent_activity.length === 0 ? (
             <Card flat className="px-5 py-6">
-              <p className="t-support text-fg2">Nothing yet today.</p>
+              <p className="t-support text-fg2">No activity yet.</p>
             </Card>
           ) : (
             <Card flat className="px-2 py-1">

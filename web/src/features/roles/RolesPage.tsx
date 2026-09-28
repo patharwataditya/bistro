@@ -7,7 +7,7 @@ import { StatusChip } from '@/ui/Chip'
 import { PageHeader } from '@/ui/Page'
 import { EmptyState, ErrorState, StaleBanner } from '@/ui/States'
 import { DataTable, Td, Th } from '@/ui/Table'
-import { rowProps, TableSkeleton } from '@/features/staff/manage-kit'
+import { RowOpen, rowProps, TableSkeleton } from '@/features/staff/manage-kit'
 import { usePermissionCatalog, useRolesLive } from './api'
 
 export default function RolesPage() {
@@ -51,23 +51,30 @@ export default function RolesPage() {
           </thead>
           <tbody>
             {sorted.map((r) => (
-              <tr key={r.id} {...rowProps(() => navigate(`/roles/${r.id}`), r.editable ? `Edit ${r.name}` : `View ${r.name}`)}>
+              <tr key={r.id} {...rowProps(() => navigate(`/roles/${r.id}`))}>
                 <Td>
-                  <span className="flex items-center gap-2">
-                    <span className="t-body-strong text-fg">{r.name}</span>
-                    {!r.editable && (
-                      <span title="You can't edit this role" className="inline-flex text-fg3">
-                        <Lock aria-hidden className="size-4" />
-                        <span className="sr-only">(you can't edit this role)</span>
-                      </span>
-                    )}
-                  </span>
-                  {r.description && <span className="t-support mt-0.5 block text-fg2 lg:hidden">{r.description}</span>}
+                  <RowOpen onOpen={() => navigate(`/roles/${r.id}`)}>
+                    <span className="flex items-center gap-2">
+                      <span className="t-body-strong text-fg">{r.name}</span>
+                      {!r.editable && (
+                        <span title="You can't edit this role" className="inline-flex text-fg3">
+                          <Lock aria-hidden className="size-4" />
+                          <span className="sr-only">(view only)</span>
+                        </span>
+                      )}
+                    </span>
+                    {r.description && <span className="t-support mt-0.5 block text-fg2 lg:hidden">{r.description}</span>}
+                  </RowOpen>
                 </Td>
                 <Td className="t-support hidden max-w-[420px] text-fg2 lg:table-cell">
                   <span className="line-clamp-2">{r.description || <span className="text-fg3">—</span>}</span>
                 </Td>
-                <Td className="text-right tabular-nums">{r.member_count}</Td>
+                <Td className="text-right whitespace-nowrap tabular-nums">
+                  {r.member_count}
+                  {r.assigned_count > r.member_count && (
+                    <span className="t-meta block text-fg3">+{r.assigned_count - r.member_count} deactivated</span>
+                  )}
+                </Td>
                 <Td className="text-right whitespace-nowrap tabular-nums text-fg2">
                   {total !== null ? `${r.permissions.length} of ${total}` : r.permissions.length}
                 </Td>

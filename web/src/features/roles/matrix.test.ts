@@ -1,6 +1,6 @@
 import type { PermissionInfo, Role } from '@/api/types'
 import { Grants } from '@/auth/permissions'
-import { diffRole, formOf, groupPermissions, humanize, isDangerous, readOnlyReason, selectAllState, toggleGroup } from './matrix'
+import { deleteRoleCopy, diffRole, formOf, groupPermissions, humanize, isDangerous, readOnlyReason, selectAllState, toggleGroup } from './matrix'
 
 const catalog: PermissionInfo[] = [
   { code: 'tables.view', group: 'Tables', description: 'See the floor' },
@@ -13,7 +13,7 @@ const catalog: PermissionInfo[] = [
 
 const role = (over: Partial<Role> = {}): Role => ({
   id: 7, name: 'Waiter', description: 'Serves tables', is_system: false, permissions: ['tables.view', 'orders.view'],
-  member_count: 2, version: 4, editable: true, ...over,
+  member_count: 2, assigned_count: 2, version: 4, editable: true, ...over,
 })
 
 describe('groupPermissions', () => {
@@ -101,5 +101,28 @@ describe('readOnlyReason', () => {
     expect(readOnlyReason(false, role({ permissions: ['billing.refund'] }), actor(all))).toBe("This role includes access you don't have, so you can't edit it.")
     expect(readOnlyReason(false, role({ editable: false }), actor(all))).toBe("Someone with this role has access you don't have, so you can't edit it.")
     expect(readOnlyReason(false, role(), actor(all))).toBeNull()
+  })
+})
+
+describe('deleteRoleCopy', () => {
+  it('allows deleting a role nobody holds', () => {
+    const c = deleteRoleCopy({ member_count: 0, assigned_count: 0 })
+    expect(c.blocked).toBe(false)
+    expect(c.message).toMatch(/removed for good/)
+  })
+
+  it('blocks when only deactivated staff hold it, and says so', () => {
+    const c = deleteRoleCopy({ member_count: 0, assigned_count: 1 })
+    expect(c.blocked).toBe(true)
+    expect(c.message).toMatch(/^Held by 1 deactivated staff member\. Remove the role from them first/)
+    expect(c.message).not.toMatch(/for good/)
+    expect(deleteRoleCopy({ member_count: 0, assigned_count: 3 }).message).toMatch(/^Held by 3 deactivated staff members/)
+  })
+
+  it('counts active and deactivated holders separately', () => {
+    expect(deleteRoleCopy({ member_count: 1, assigned_count: 1 }).message).toBe('1 person has this role. Move everyone to another role first, then delete it.')
+    const c = deleteRoleCopy({ member_count: 2, assigned_count: 5 })
+    expect(c.blocked).toBe(true)
+    expect(c.message).toMatch(/^2 people have this role, plus 3 deactivated\./)
   })
 })

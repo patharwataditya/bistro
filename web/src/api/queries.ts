@@ -8,7 +8,7 @@ import { keepPreviousData, QueryClient, useQuery, type QueryKey, type UseQueryOp
 import { request } from './client'
 import { ApiError } from './errors'
 import type {
-  AuditPage, Bill, BillSummary, Dashboard, Floor, KitchenBoard, Menu, Order, OrderSummary, Page,
+  Bill, BillSummary, Dashboard, Floor, KitchenBoard, Menu, Order, OrderSummary, Page,
   PaymentMethod, PermissionInfo, Report, RestaurantSettings, Role, StaffMember,
 } from './types'
 
@@ -84,12 +84,3 @@ export const useUsers = (includeInactive: boolean, q: string, offset = 0, limit 
   }, { placeholderData: keepPreviousData })
 
 export interface AuditFilter { action?: string; actorId?: number; entityType?: string; since?: string; until?: string }
-
-export function auditQuery(filter: AuditFilter, beforeId: number | null) {
-  return request<AuditPage>('/audit-logs', {
-    query: {
-      action: filter.action, actor_id: filter.actorId, entity_type: filter.entityType,
-      since: filter.since, until: filter.until, before_id: beforeId, limit: 50,
-    },
-  })
-}

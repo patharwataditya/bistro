@@ -1,9 +1,33 @@
 import { X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Dialog as RDialog } from 'radix-ui'
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { Button } from './Button'
 import { cn } from './cn'
+
+/**
+ * Focus return for dialogs opened without a Radix Trigger (all of ours). Radix only returns
+ * focus to its own Trigger, so without one focus fell to <body> on close. This remembers what
+ * had focus when the dialog opened and puts focus back there, if it's still on the page.
+ */
+function useReturnFocus() {
+  const opener = useRef<HTMLElement | null>(null)
+  return {
+    onOpenAutoFocus: () => {
+      // Runs before Radix moves focus inside, so this is still the invoking element.
+      const el = document.activeElement
+      opener.current = el instanceof HTMLElement && el !== document.body ? el : null
+    },
+    onCloseAutoFocus: (e: Event) => {
+      const el = opener.current
+      opener.current = null
+      if (el && el.isConnected) {
+        e.preventDefault()
+        el.focus({ preventScroll: true })
+      }
+    },
+  }
+}
 
 const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: 0.16 } }
 
@@ -11,7 +35,7 @@ const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity
  * Side panel — the web counterpart of Android's bottom sheets. While `busy` it can't be
  * dismissed (Escape / outside click / close), so a result is never hidden mid-request.
  */
-export function Drawer({ open, onOpenChange, title, description, children, footer, busy, width = 480 }: {
+export function Drawer({ open, onOpenChange, title, description, children, footer, busy, width = 480, onEscapeKeyDown }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
@@ -20,7 +44,13 @@ export function Drawer({ open, onOpenChange, title, description, children, foote
   footer?: ReactNode
   busy?: boolean
   width?: number
+  /**
+   * Runs on Escape before the drawer closes; call `e.preventDefault()` to keep it open (e.g.
+   * to cancel an inline edit instead). Not called while `busy` (Escape is ignored then).
+   */
+  onEscapeKeyDown?: (e: KeyboardEvent) => void
 }) {
+  const focus = useReturnFocus()
   return (
     <RDialog.Root open={open} onOpenChange={(o) => (busy ? undefined : onOpenChange(o))}>
       <AnimatePresence>
@@ -32,9 +62,12 @@ export function Drawer({ open, onOpenChange, title, description, children, foote
             <RDialog.Content
               asChild
               forceMount
-              onEscapeKeyDown={(e) => busy && e.preventDefault()}
+              {...focus}
+              onEscapeKeyDown={(e) => {
+                if (busy) e.preventDefault()
+                else onEscapeKeyDown?.(e)
+              }}
               onPointerDownOutside={(e) => busy && e.preventDefault()}
-              aria-describedby={description ? undefined : undefined}
             >
               <motion.div
                 initial={{ x: 40, opacity: 0 }}
@@ -83,6 +116,7 @@ export function ConfirmDialog({ open, onOpenChange, title, message, confirmLabel
   confirmDisabled?: boolean
   children?: ReactNode
 }) {
+  const focus = useReturnFocus()
   return (
     <RDialog.Root open={open} onOpenChange={(o) => (loading ? undefined : onOpenChange(o))}>
       <AnimatePresence>
@@ -91,7 +125,7 @@ export function ConfirmDialog({ open, onOpenChange, title, message, confirmLabel
             <RDialog.Overlay asChild forceMount>
               <motion.div {...fade} className="fixed inset-0 z-40 bg-scrim" />
             </RDialog.Overlay>
-            <RDialog.Content asChild forceMount role="alertdialog" onEscapeKeyDown={(e) => loading && e.preventDefault()} onPointerDownOutside={(e) => loading && e.preventDefault()}>
+            <RDialog.Content asChild forceMount role="alertdialog" {...focus} onEscapeKeyDown={(e) => loading && e.preventDefault()} onPointerDownOutside={(e) => loading && e.preventDefault()}>
               <motion.div
                 initial={{ opacity: 0, scale: 0.96, y: 8 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}

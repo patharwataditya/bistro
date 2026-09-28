@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Report } from '@/api/types'
-import { breakdownRows, dailySeries, hourlySeries, isEmptyReport, tableRows, topSellerRows } from './chartData'
+import { averageMinutes, breakdownRows, dailySeries, hourlySeries, isEmptyReport, tableRows, topSellerRows } from './chartData'
 
 const day = (date: string, gross: string, refunds: string, net: string, orders = 1) => ({ date, gross_sales: gross, refunds, net_sales: net, orders })
 
@@ -47,6 +47,14 @@ describe('rankings', () => {
     ])
     expect(rows.map((r) => r.ratio)).toEqual([1, 0.5])
   })
+  it('keys top sellers by item and name, since a renamed item is listed once per name', () => {
+    const rows = topSellerRows([
+      { menu_item_id: 1, name: 'Dal Makhani', quantity: 6, revenue: '600.00' },
+      { menu_item_id: 1, name: 'Dal', quantity: 4, revenue: '400.00' },
+    ])
+    expect(rows.map((r) => r.key)).toEqual(['1|Dal Makhani', '1|Dal'])
+    expect(new Set(rows.map((r) => r.key)).size).toBe(2)
+  })
   it('gives payment shares of the positive total, keeping negative amounts out of it', () => {
     const rows = breakdownRows([
       { name: 'Card', count: 2, amount: '250.00' },
@@ -62,6 +70,14 @@ describe('rankings', () => {
       { table_name: 'T2', orders: 2, revenue: '400.00', average_minutes: 45 },
     ])
     expect(rows.map((r) => [r.table_name, r.ratio])).toEqual([['T2', 1], ['T1', 0.25]])
+  })
+})
+
+describe('averageMinutes', () => {
+  it('shows a dash when nothing was timed (open checks)', () => {
+    expect(averageMinutes(0)).toBe('—')
+    expect(averageMinutes(null)).toBe('—')
+    expect(averageMinutes(42)).toBe('42 min')
   })
 })
 

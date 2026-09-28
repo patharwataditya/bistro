@@ -7,7 +7,7 @@ import type { MenuCategory, MenuItem } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
 import { useAction } from '@/features/common/useAction'
-import { applyServerErrors, DrawerActions, Notice, useDiscardConfirm } from '@/features/staff/manage-kit'
+import { applyServerErrors, DrawerActions, Notice, useDiscardConfirm, useUnsavedGuard } from '@/features/staff/manage-kit'
 import { acceptMoney } from '@/lib/money-input'
 import { Button } from '@/ui/Button'
 import { SelectField, TextArea, TextField } from '@/ui/Field'
@@ -82,6 +82,8 @@ function ItemDrawerBody({ editor, categories, onClose }: { editor: ItemEditor; c
   const busy = create.isPending || update.isPending || remove.isPending
   const dirty = formState.isDirty
   const discard = useDiscardConfirm(dirty && editable)
+  // Browser Back / in-app links / closing the tab ask first too, like the page forms.
+  const guard = useUnsavedGuard(dirty && editable)
 
   const submit = handleSubmit((v) => {
     setFormError(null)
@@ -108,12 +110,15 @@ function ItemDrawerBody({ editor, categories, onClose }: { editor: ItemEditor; c
         description={item ? 'Price changes apply to new orders only.' : "It's available to order as soon as you add it."}
         footer={
           <DrawerActions
+            leading={canDelete && editable ? (
+              <Button variant="danger" icon={Trash2} onClick={() => setConfirmDelete(true)} disabled={busy}>Remove</Button>
+            ) : undefined}
             secondary={
-              canDelete ? (
+              canDelete && !editable ? (
                 <Button variant="danger" icon={Trash2} onClick={() => setConfirmDelete(true)} disabled={busy}>Remove</Button>
-              ) : (
+              ) : editable ? (
                 <Button variant="secondary" onClick={() => discard.request(onClose)} disabled={busy}>Cancel</Button>
-              )
+              ) : undefined
             }
             primary={
               editable ? (
@@ -190,6 +195,7 @@ function ItemDrawerBody({ editor, categories, onClose }: { editor: ItemEditor; c
         </form>
       </Drawer>
       {discard.dialog}
+      {guard}
       {item && (
         <ConfirmDialog
           open={confirmDelete}

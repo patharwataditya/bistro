@@ -144,3 +144,27 @@ export function readOnlyReason(
   if (!role.editable) return "Someone with this role has access you don't have, so you can't edit it."
   return null
 }
+
+/**
+ * What deleting a role will do. The server refuses while anyone holds it — deactivated staff
+ * included — so `blocked` mirrors that and the copy says who is in the way.
+ */
+export function deleteRoleCopy(role: Pick<Role, 'member_count' | 'assigned_count'>): { blocked: boolean; message: string } {
+  const active = role.member_count
+  const inactive = Math.max(0, role.assigned_count - active)
+  const people = (n: number) => `${n} ${n === 1 ? 'person' : 'people'}`
+  if (active === 0 && inactive === 0) {
+    return { blocked: false, message: 'The role is removed for good. This is recorded in the audit log.' }
+  }
+  if (active === 0) {
+    return {
+      blocked: true,
+      message: `Held by ${inactive} deactivated staff ${inactive === 1 ? 'member' : 'members'}. Remove the role from them first (turn on “Show deactivated” in Staff), then delete it.`,
+    }
+  }
+  const also = inactive > 0 ? `, plus ${inactive} deactivated` : ''
+  return {
+    blocked: true,
+    message: `${people(active)} ${active === 1 ? 'has' : 'have'} this role${also}. Move everyone to another role first, then delete it.`,
+  }
+}

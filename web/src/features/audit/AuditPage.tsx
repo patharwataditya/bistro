@@ -1,12 +1,9 @@
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
-import { ChevronDown, History, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, History, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'motion/react'
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { useSearchParams } from 'react-router'
-import { request } from '@/api/client'
 import type { ApiError } from '@/api/errors'
-import { auditQuery, keys } from '@/api/queries'
-import type { AuditEntry, AuditPage as AuditPageData, Page, StaffMember } from '@/api/types'
+import type { AuditEntry } from '@/api/types'
 import { P } from '@/auth/permissions'
 import { useMe } from '@/auth/session'
 import { dateTime, relative } from '@/lib/format'
@@ -19,7 +16,8 @@ import { SelectField, TextField } from '@/ui/Field'
 import { PageHeader } from '@/ui/Page'
 import { EmptyState, ErrorState, Skeleton, SkeletonList, StaleBanner } from '@/ui/States'
 import { TONE } from '@/ui/tone'
-import { AUDIT_CHIPS, chipByKey, dateRangeError, displayValue, humanize, toAuditQuery, type AuditScreenFilter } from './filters'
+import { useAuditActors, useAuditLog } from './api'
+import { AUDIT_CHIPS, chipByKey, dateError, dateRangeError, displayValue, humanize, isCommittableDate, toAuditQuery, type AuditScreenFilter } from './filters'
 import { auditKind } from './kinds'
 
 function useFilter(): [AuditScreenFilter, (patch: Partial<AuditScreenFilter>) => void] {
@@ -43,49 +41,24 @@ function useFilter(): [AuditScreenFilter, (patch: Partial<AuditScreenFilter>) =>
   return [filter, update]
 }
 
-/** Everyone who could appear as an actor, deactivated staff included. Only with staff.view. */
-function useActors(enabled: boolean) {
-  return useQuery<Page<StaffMember>, ApiError>({
-    queryKey: keys.users('audit-actors'),
-    queryFn: ({ signal }) => request<Page<StaffMember>>('/users', { query: { include_inactive: true, limit: 200 }, signal }),
-    enabled,
-    staleTime: 60_000,
-  })
-}
-
 export default function AuditPage() {
   const { me, can } = useMe()
   const zone = me.location.timezone
   const [filter, setFilter] = useFilter()
   const apiFilter = useMemo(() => toAuditQuery(filter, zone), [filter, zone])
   const canStaff = can(P.STAFF_VIEW)
-  const actors = useActors(canStaff)
-
-  const query = useInfiniteQuery<AuditPageData, ApiError, { pages: AuditPageData[] }, readonly unknown[], number | null>({
-    queryKey: keys.audit(JSON.stringify(apiFilter)),
-    queryFn: ({ pageParam }) => auditQuery(apiFilter, pageParam),
-    initialPageParam: null,
-    getNextPageParam: (last) => last.next_before_id ?? undefined,
-    refetchInterval: 30_000,
-  })
-
-  const entries = useMemo(() => {
-    const seen = new Set<number>()
-    const out: AuditEntry[] = []
-    for (const page of query.data?.pages ?? []) {
-      for (const e of page.items) {
-        if (!seen.has(e.id)) {
-          seen.add(e.id)
-          out.push(e)
-        }
-      }
-    }
-    return out
-  }, [query.data])
+  const actors = useAuditActors(canStaff)
+  const { list: query, head, entries, newerHidden, showNewer } = useAuditLog(apiFilter)
 
   const chip = chipByKey(filter.chip)
   const filtered = chip.prefix !== null || filter.actorId !== null || filter.from !== '' || filter.to !== ''
   const rangeErr = dateRangeError(filter.from, filter.to)
+  // A person filtered by link (or deactivated and not in the list) still shows who it is.
+  const actorKnown = filter.actorId === null || (actors.data?.items ?? []).some((u) => u.id === filter.actorId)
+  const actorFallback = filter.actorId !== null && !actorKnown
+    ? entries.find((e) => e.actor_id === filter.actorId)?.actor_name ?? `Person #${filter.actorId}`
+    : null
+  const staleError = query.isError && query.data && !query.isFetchNextPageError ? query.error : head.isError && head.data ? head.error : null
 
   return (
     <div className="mx-auto flex max-w-[1100px] flex-col gap-4">
@@ -110,13 +83,14 @@ export default function AuditPage() {
               disabled={!actors.data}
             >
               <option value="">Everyone</option>
+              {actorFallback !== null && <option value={filter.actorId ?? ''}>{actorFallback}</option>}
               {(actors.data?.items ?? []).map((u) => (
                 <option key={u.id} value={u.id}>{u.full_name}{u.is_active ? '' : ' (deactivated)'}</option>
               ))}
             </SelectField>
           )}
-          <TextField label="From" type="date" value={filter.from} max={filter.to || undefined} onChange={(e) => setFilter({ from: e.target.value })} wrapperClassName="w-[calc(50%-6px)] sm:w-[180px]" />
-          <TextField label="To" type="date" value={filter.to} min={filter.from || undefined} onChange={(e) => setFilter({ to: e.target.value })} wrapperClassName="w-[calc(50%-6px)] sm:w-[180px]" error={rangeErr} />
+          <DateFilter label="From" value={filter.from} min="2000-01-01" max={filter.to || undefined} onCommit={(from) => setFilter({ from })} />
+          <DateFilter label="To" value={filter.to} min={filter.from || '2000-01-01'} onCommit={(to) => setFilter({ to })} error={rangeErr} />
           {filtered && (
             <Button variant="ghost" icon={X} className="mt-[22px]" onClick={() => setFilter({ chip: 'all', actorId: null, from: '', to: '' })}>
               Clear filters
@@ -126,7 +100,13 @@ export default function AuditPage() {
         <p className="t-meta text-fg3">Dates are in restaurant time ({zone}).</p>
       </div>
 
-      {query.isError && query.data && !query.isFetchNextPageError && <StaleBanner error={query.error} />}
+      {staleError && <StaleBanner error={staleError} />}
+      {newerHidden && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-[var(--radius-md)] bg-info-soft px-3 py-2 text-info">
+          <span className="t-meta flex-1">New activity has been recorded.</span>
+          <Button variant="secondary" icon={ArrowUp} onClick={showNewer}>Show new activity</Button>
+        </div>
+      )}
 
       {!query.data ? (
         query.isError ? <ErrorState error={query.error} onRetry={() => void query.refetch()} /> : <SkeletonList rows={8} />
@@ -222,7 +202,8 @@ function AuditRow({ entry, zone, now, expanded, onToggle }: { entry: AuditEntry;
         onClick={onToggle}
         aria-expanded={expanded}
         aria-controls={panelId}
-        className="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--hover-overlay)] focus-visible:rounded-none sm:px-5"
+        // The card clips anything drawn outside a row, so the focus ring is drawn inside it.
+        className="flex w-full items-start gap-3 px-4 py-3.5 text-left transition-colors hover:bg-[var(--hover-overlay)] focus-visible:rounded-none focus-visible:shadow-[inset_0_0_0_2px_var(--accent)] sm:px-5"
       >
         <span className={cn('mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-sm)]', TONE[kind.tone].bg, TONE[kind.tone].fg)}>
           <kind.icon aria-hidden className="size-[18px]" />
@@ -268,5 +249,52 @@ function Detail({ label, value, mono }: { label: string; value: string; mono?: b
       <dt className="t-meta py-0.5 text-fg3">{label}</dt>
       <dd className={cn('t-support min-w-0 py-0.5 break-words whitespace-pre-wrap text-fg', mono && 'font-mono text-[12px]')}>{value}</dd>
     </>
+  )
+}
+
+/**
+ * A date filter that only reaches the URL (and the API) once a date is complete: typing a year
+ * digit by digit passes through dates like 0002-09-28, which are held back until the field
+ * leaves focus or Enter is pressed. Picking from the calendar applies straight away.
+ */
+function DateFilter({ label, value, min, max, error, onCommit }: {
+  label: string
+  value: string
+  min?: string
+  max?: string
+  error?: string | null
+  onCommit: (value: string) => void
+}) {
+  const [draft, setDraft] = useState(value)
+  const [shown, setShown] = useState(value)
+  const [blurred, setBlurred] = useState(false)
+  // Follow the URL when it changes elsewhere (Clear filters, back/forward).
+  if (value !== shown) {
+    setShown(value)
+    setDraft(value)
+  }
+  const draftError = dateError(draft)
+  const commit = () => {
+    setBlurred(true)
+    if (draft !== value && draftError === null) onCommit(draft)
+  }
+  return (
+    <TextField
+      label={label}
+      type="date"
+      value={draft}
+      min={min}
+      max={max}
+      onChange={(e) => {
+        const next = e.target.value
+        setDraft(next)
+        setBlurred(false)
+        if (isCommittableDate(next) && next !== value) onCommit(next)
+      }}
+      onBlur={commit}
+      onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && commit()}
+      wrapperClassName="w-[calc(50%-6px)] sm:w-[180px]"
+      error={(blurred ? draftError : null) ?? error}
+    />
   )
 }

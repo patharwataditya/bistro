@@ -28,6 +28,9 @@ class RoleOut(OutputModel):
     is_system: bool
     permissions: list[str]
     member_count: int
+    # Everyone holding the role, deactivated staff included. A role can only be deleted
+    # once this is 0; member_count (active only) is kept as-is for existing clients.
+    assigned_count: int
     version: int
     editable: bool
 
