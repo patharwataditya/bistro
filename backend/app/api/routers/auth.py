@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Response, status
 
 from app.api.deps import DB, CurrentActor
 from app.api.routing import TransactionalRoute
+from app.core.errors import PermissionDenied
 from app.core.permissions import PERMISSIONS
 from app.models import Restaurant
 from app.schemas.auth import ChangePasswordIn, LoginIn, RefreshIn, TokenPair
@@ -53,7 +54,11 @@ def me(actor: CurrentActor, db: DB) -> MeOut:
 
 @router.post("/me/password", response_model=TokenPair)
 def change_password(body: ChangePasswordIn, actor: CurrentActor, db: DB) -> TokenPair:
-    """Change your password. Signs out every other device; returns fresh tokens for this one."""
+    """Change your password. Signs out every other device; returns fresh tokens for this one.
+    Phone sessions only: a browser uses /auth/web/password, which keeps its token in a cookie
+    and its browser session limits."""
+    if auth.session_client(db, actor.session_id) != "mobile":
+        raise PermissionDenied("Change your password from the Bistro web app's account page.")
     pair = auth.change_password(db, actor.user, body.current_password, body.new_password)
     audit.record(db, actor, "staff.password_changed", "user", actor.id,
                  f"{actor.user.full_name} changed their password")

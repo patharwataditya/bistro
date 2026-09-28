@@ -27,8 +27,10 @@ export class ApiError extends Error {
   readonly code: string | null
   readonly fields: FieldErrors
   readonly retryAfterSeconds: number | null
+  /** Machine-readable detail for special cases, e.g. "idle" when a session timed out. */
+  readonly reason: string | null
 
-  constructor(kind: ErrorKind, message: string, opts: { status?: number; code?: string | null; fields?: FieldErrors; retryAfterSeconds?: number | null } = {}) {
+  constructor(kind: ErrorKind, message: string, opts: { status?: number; code?: string | null; fields?: FieldErrors; retryAfterSeconds?: number | null; reason?: string | null } = {}) {
     super(message)
     this.name = 'ApiError'
     this.kind = kind
@@ -36,6 +38,7 @@ export class ApiError extends Error {
     this.code = opts.code ?? null
     this.fields = opts.fields ?? {}
     this.retryAfterSeconds = opts.retryAfterSeconds ?? null
+    this.reason = opts.reason ?? null
   }
 
   /** Worth a "Try again" button. */
@@ -68,7 +71,8 @@ export function fromResponse(status: number, body: unknown): ApiError {
   const code = typeof env?.code === 'string' ? env.code : null
   const message = typeof env?.message === 'string' ? env.message : null
   const details = env?.details
-  const opts = { status, code }
+  const rawReason = details && typeof details === 'object' ? (details as { reason?: unknown }).reason : undefined
+  const opts = { status, code, reason: typeof rawReason === 'string' ? rawReason : null }
   switch (code) {
     case 'UNAUTHENTICATED':
     case 'TOKEN_EXPIRED':

@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,7 +23,6 @@ class Settings(BaseSettings):
     web_origin: str | None = None
     login_max_failures: int = 5
     login_lockout_seconds: int = 15 * 60
-    cors_origins: list[str] = Field(default_factory=list)
     log_level: str = "INFO"
     max_body_bytes: int = 256 * 1024
 

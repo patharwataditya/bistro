@@ -64,6 +64,8 @@ services:
       BISTRO_WORKERS: "2"
       # Only Caddy (on the edge network) may set forwarding headers.
       BISTRO_TRUSTED_PROXIES: 172.30.0.0/24
+      # Browser sign-in endpoints accept only requests from the web app on this exact origin.
+      BISTRO_WEB_ORIGIN: https://${BISTRO_DOMAIN:?set in .env.prod}
     networks: [backend, edge]
     mem_limit: 640m
     memswap_limit: 640m

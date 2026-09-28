@@ -7,6 +7,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { authRequest, configureAuth, request } from '@/api/client'
+import { idleSeconds } from './activity'
 import { ApiError } from '@/api/errors'
 import type { Me, WebSession } from '@/api/types'
 import { Grants, type Permission } from './permissions'
@@ -32,6 +33,8 @@ const CHANNEL = 'bistro-session'
 const LOCK = 'bistro-auth-refresh'
 
 let accessToken: string | null = null
+/** Why the last refresh ended the session, when the person should be told (idle timeout). */
+let endedNotice: string | null = null
 
 async function withRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
   if ('locks' in navigator && navigator.locks) {
@@ -64,11 +67,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Another request in this tab already refreshed while we waited for the lock.
       if (accessToken && accessToken !== failedToken) return accessToken
       try {
-        const s = await authRequest<WebSession>('/auth/web/refresh')
+        const s = await authRequest<WebSession>('/auth/web/refresh', { idle_seconds: idleSeconds() })
         accessToken = s.access_token
         return accessToken
       } catch (e) {
-        if (e instanceof ApiError && e.kind === 'session-ended') return null
+        if (e instanceof ApiError && e.kind === 'session-ended') {
+          endedNotice = e.reason === 'idle' ? e.message : null
+          return null
+        }
         throw e
       }
     })
@@ -83,7 +89,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     try {
       const token = await refresh(null)
       if (!token) {
-        setState({ status: 'signed-out', notice: null })
+        setState({ status: 'signed-out', notice: endedNotice })
         return
       }
       await loadMe()
@@ -106,7 +112,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           throw new ApiError('offline', "Can't reach Bistro. Check the connection and try again.")
         }
       },
-      onSessionEnded: (message) => endLocally(message),
+      onSessionEnded: (message) => endLocally(endedNotice ?? message),
     })
   }, [refresh, endLocally])
 

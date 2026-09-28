@@ -57,6 +57,15 @@ Set-Cookie: __Host-bistro_rt=<token>; Path=/; Secure; HttpOnly; SameSite=Strict;
 - **Web session lifetime:** add a `ttl` parameter to `start_session`. Web uses 12 h
   absolute (one shift) plus a 2 h idle timeout, enforced on refresh via
   `session.last_used_at`. `Max-Age` equals the time left on the absolute lifetime.
+  **Idle means no interaction:** the app reports `idle_seconds` (time since the last
+  pointer/key/wheel/touch input) on every refresh; the server moves `last_used_at` only to
+  that last interaction, so a screen left polling on a shared PC still times out. The idle
+  check runs on the stored value first, so a click after the limit can't revive a session.
+- **Client binding:** a session remembers its client (`mobile` | `web`). Web tokens are
+  refused by `/auth/refresh` and phone tokens by `/auth/web/refresh`; `/me/password` refuses
+  web sessions and `/auth/web/password`, `/auth/web/logout-all` refuse phone sessions.
+- **One session per browser:** a web sign-in revokes the session named by any cookie the
+  browser already holds.
   Android keeps 30 days.
 - The server derives `device_label` itself (for example `"Web · Chrome on Windows"` from
   a parsed, truncated User-Agent). The client does not send it.
@@ -197,7 +206,7 @@ export function refreshAccessToken(): Promise<string> {
 SPA responses:
 
 ```
-Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; upgrade-insecure-requests
+Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'
 Cross-Origin-Opener-Policy: same-origin
 Cross-Origin-Resource-Policy: same-origin
 Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()
@@ -209,6 +218,17 @@ Kept from the existing global block: HSTS, `X-Content-Type-Options: nosniff`,
 `/api/v1/*` responses: add `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`.
 
 ### CSP notes
+
+**As shipped (verified by `web/e2e/csp-sweep.mjs` against the real Caddyfile):**
+- `style-src` allows `'unsafe-inline'`. Radix's modal scroll lock (react-remove-scroll)
+  injects a `<style>` element whose content depends on the scrollbar width, so it can't be
+  hashed, and static files can't carry a per-request nonce. The risk accepted is CSS
+  injection only: React escapes all text, `dangerouslySetInnerHTML` is banned by lint, and
+  `script-src` stays `'self'` with no `'unsafe-inline'` or `'unsafe-eval'`.
+- Zod runs in `jitless` mode (its JIT probes `new Function`, which the policy forbids).
+- Vite's `assetsInlineLimit` is 0, so fonts are never inlined as `data:` URIs.
+
+Original design notes:
 
 - **React and motion libraries:** they set styles through the CSSOM
   (`element.style.x = …`), and CSP does not restrict that. So `style-src 'self'` works

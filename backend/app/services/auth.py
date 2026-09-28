@@ -129,7 +129,14 @@ def login(db: Session, username: str, password: str, device_label: str | None,
     return pair
 
 
-def refresh(db: Session, refresh_token: str) -> TokenPair:
+def refresh(db: Session, refresh_token: str, client: str = "mobile",
+            idle_seconds: int | None = None) -> TokenPair:
+    """Rotate a refresh token. `client` is the endpoint family the token was presented to: a
+    browser token is never accepted by the mobile endpoint (which would hand it to scripts
+    in JSON) and a phone token never by the browser endpoint (30 days, no idle limit).
+
+    Browser sessions end after an idle period measured from the person's last interaction,
+    which the web app reports as `idle_seconds`; background polling alone never counts."""
     token = db.scalar(
         select(RefreshToken)
         .where(RefreshToken.token_hash == hash_refresh_token(refresh_token))
@@ -142,12 +149,15 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     now = _now()
     if session is None or session.revoked_at is not None or session.expires_at <= now:
         raise Unauthenticated("Your session has ended. Sign in again.")
+    if session.client != client:
+        raise Unauthenticated("Your session has ended. Sign in again.")
     if session.client == "web" and now - session.last_used_at > timedelta(
             seconds=get_settings().web_idle_timeout_seconds):
         # Idle browser on a shared PC: the next person must sign in themselves.
         session.revoked_at = now
         db.commit()
-        raise Unauthenticated("You were signed out after a period of inactivity.")
+        raise Unauthenticated("You were signed out after a period of inactivity.",
+                              details={"reason": "idle"})
     if token.used_at is not None and now - token.used_at <= REFRESH_GRACE:
         # The client may be retrying a refresh whose response it never received (Wi-Fi
         # dropped mid-response). That is only plausible if the successor we issued has never
@@ -168,7 +178,7 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
         for s in successors:
             db.delete(s)
         token.used_at = now
-        session.last_used_at = now
+        _touch(session, now, idle_seconds)
         return _issue(db, user, session)
     if token.used_at is not None:
         # A rotated token came back: it was stolen or replayed. Kill the whole session.
@@ -182,8 +192,27 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
         db.commit()
         raise AccountInactive("This account has been deactivated.")
     token.used_at = now
-    session.last_used_at = now
+    _touch(session, now, idle_seconds)
     return _issue(db, user, session)
+
+
+def _touch(session: AuthSession, now: datetime, idle_seconds: int | None) -> None:
+    if session.client != "web":
+        session.last_used_at = now
+    elif idle_seconds is not None:
+        # max(): another tab of the same browser may have reported a later interaction.
+        session.last_used_at = max(session.last_used_at, now - timedelta(seconds=idle_seconds))
+
+
+def session_for_refresh_token(db: Session, refresh_token: str) -> AuthSession | None:
+    token = db.scalar(select(RefreshToken).where(
+        RefreshToken.token_hash == hash_refresh_token(refresh_token)))
+    return db.get(AuthSession, token.session_id) if token is not None else None
+
+
+def session_client(db: Session, session_id: object) -> str | None:
+    session = db.get(AuthSession, session_id)
+    return session.client if session is not None else None
 
 
 def logout(db: Session, user_id: int, session_id: object) -> None:

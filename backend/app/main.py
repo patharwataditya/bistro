@@ -23,9 +23,14 @@ API_PREFIX = "/api/v1"
 
 
 def _error(status: int, code: str, message: str, details: dict[str, Any] | None = None,
-           headers: dict[str, str] | None = None) -> JSONResponse:
-    return JSONResponse({"error": {"code": code, "message": message, "details": details or {}}},
-                        status_code=status, headers=headers)
+           headers: list[tuple[str, str]] | None = None) -> JSONResponse:
+    response = JSONResponse({"error": {"code": code, "message": message,
+                                       "details": details or {}}}, status_code=status)
+    # Error envelopes describe one request at one moment: never let a cache replay them.
+    response.headers["Cache-Control"] = "no-store"
+    for name, value in headers or []:
+        response.headers.append(name, value)
+    return response
 
 
 @asynccontextmanager
@@ -55,7 +60,9 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(AppError)
     async def app_error(_: Request, exc: AppError) -> JSONResponse:
-        headers = {"WWW-Authenticate": "Bearer"} if exc.status_code == 401 else None
+        headers = list(exc.headers)
+        if exc.status_code == 401:
+            headers.append(("WWW-Authenticate", "Bearer"))
         return _error(exc.status_code, exc.code, exc.message, exc.details, headers)
 
     @app.exception_handler(RequestValidationError)

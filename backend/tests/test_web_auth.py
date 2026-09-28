@@ -1,7 +1,7 @@
 from app.seed import DEMO_PASSWORD
 from tests.conftest import err, ok
 
-WEB = {"X-Bistro-Client": "web"}
+WEB = {"X-Bistro-Client": "web", "Origin": "http://testserver"}
 
 
 def web_login(client, username="manager", password=DEMO_PASSWORD, headers=WEB):

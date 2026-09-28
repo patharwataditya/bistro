@@ -24,6 +24,8 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false, // no source maps in production bundles
+    // Never inline assets as data: URIs; the CSP only loads fonts and images from 'self'.
+    assetsInlineLimit: 0,
     chunkSizeWarningLimit: 600,
   },
   test: {

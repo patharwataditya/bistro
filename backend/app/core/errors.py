@@ -11,6 +11,8 @@ class AppError(Exception):
         super().__init__(message)
         self.message = message
         self.details = details or {}
+        # Extra response headers for the error envelope (e.g. clearing a cookie).
+        self.headers: list[tuple[str, str]] = []
 
 
 class ValidationFailed(AppError):
