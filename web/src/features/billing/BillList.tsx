@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, CircleCheck, CircleMinus, ReceiptText } from 'lucide-react'
-import { useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useBills } from '@/api/queries'
 import type { BillSummary } from '@/api/types'
@@ -48,6 +48,17 @@ export function BillList({ selectedId }: { selectedId: number | null }) {
   const select = (next: BillFilter) => setParams(next === 'open' ? {} : { filter: next }, { replace: true })
   const goPage = (p: number) => setParams({ ...(filter === 'open' ? {} : { filter }), ...(p > 0 ? { page: String(p) } : {}) }, { replace: true })
 
+  // Past the last page (bills were settled or voided since the link was made): go to the last real page.
+  const lastPage = data && !showingPrevious ? Math.max(0, Math.ceil(data.total / PAGE_SIZE) - 1) : null
+  const pastEnd = lastPage !== null && page > lastPage
+  const goPageRef = useRef(goPage)
+  useLayoutEffect(() => {
+    goPageRef.current = goPage
+  })
+  useEffect(() => {
+    if (pastEnd && lastPage !== null) goPageRef.current(lastPage)
+  }, [pastEnd, lastPage])
+
   const listRef = useRef<HTMLUListElement>(null)
   useLayoutEffect(() => {
     listRef.current?.scrollTo?.({ top: 0 })
@@ -60,7 +71,7 @@ export function BillList({ selectedId }: { selectedId: number | null }) {
       <StaleBanner error={query.isError && data ? query.error : null} className="mt-3" />
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
-        {query.isPending ? (
+        {query.isPending || pastEnd ? (
           <SkeletonList rows={6} />
         ) : query.isError && !data ? (
           <ErrorState error={query.error} onRetry={() => void query.refetch()} />
@@ -83,7 +94,7 @@ export function BillList({ selectedId }: { selectedId: number | null }) {
                 </li>
               ))}
             </ul>
-            {data && data.total > PAGE_SIZE && (
+            {data && (data.total > PAGE_SIZE || page > 0) && (
               <Pager offset={data.offset} count={bills.length} total={data.total} onPrev={() => goPage(page - 1)} onNext={() => goPage(page + 1)} />
             )}
           </>

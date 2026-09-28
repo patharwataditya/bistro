@@ -122,13 +122,17 @@ function DiscountForm({ bill, existing, busy, working, onApply, onRemove }: {
   )
 }
 
-/** Give money back on the method it came in on, capped per method (Android RefundSheet). */
+/**
+ * Give money back on the method it came in on, capped per method (Android RefundSheet). The
+ * refund is decided against the bill as it was when the drawer opened or a method was
+ * picked, and sends that version; it never quietly switches to another method.
+ */
 export function RefundDrawer({ open, bill, busy, onClose, onRefund }: {
   open: boolean
   bill: Bill
   busy: boolean
   onClose: () => void
-  onRefund: (target: Refundable, amount: string, reason: string) => void
+  onRefund: (target: Refundable, amount: string, reason: string, version: number) => void
 }) {
   const correction = bill.status === 'OPEN'
   return (
@@ -145,27 +149,51 @@ export function RefundDrawer({ open, bill, busy, onClose, onRefund }: {
   )
 }
 
-function RefundForm({ bill, busy, onRefund }: { bill: Bill; busy: boolean; onRefund: (target: Refundable, amount: string, reason: string) => void }) {
+export function RefundForm({ bill, busy, onRefund }: {
+  bill: Bill
+  busy: boolean
+  onRefund: (target: Refundable, amount: string, reason: string, version: number) => void
+}) {
   const cur = bill.currency_code
   const options = refundableByMethod(bill)
-  const [methodId, setMethodId] = useState(() => options[0]?.methodId ?? 0)
-  const target = options.find((o) => o.methodId === methodId) ?? options[0]
-  const [amountText, setAmountText] = useState(() => target?.amount ?? '')
+  const [chosen, setChosen] = useState<{ methodId: number; methodName: string } | null>(() => options[0] ?? null)
+  const [version, setVersion] = useState(bill.version)
+  const [amountText, setAmountText] = useState(() => options[0]?.amount ?? '')
   const [reason, setReason] = useState('')
   const [confirming, setConfirming] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
   const correction = bill.status === 'OPEN'
+  const target = chosen ? options.find((o) => o.methodId === chosen.methodId) : undefined
 
-  if (!target) {
-    return <p className="t-body py-2 pb-6 text-fg2">Nothing is held on this bill, so there's nothing to refund.</p>
+  // The chosen method has nothing left to give back (another device refunded it): never fall
+  // back to a different method — clear the choice and say why.
+  if (chosen && !target && !busy) {
+    setChosen(null)
+    setAmountText('')
+    setConfirming(false)
+    setNotice(`${chosen.methodName} has nothing left to refund — the bill changed. Check it and choose again.`)
+  }
+
+  const noticeLine = notice && (
+    <p role="status" className="t-body-strong rounded-[var(--radius-sm)] bg-warning-soft px-3 py-2 text-fg">{notice}</p>
+  )
+
+  if (options.length === 0) {
+    return (
+      <div className="flex flex-col gap-3 pb-6">
+        {noticeLine}
+        <p className="t-body py-2 text-fg2">Nothing is held on this bill, so there's nothing to refund.</p>
+      </div>
+    )
   }
 
   const amount = parseMoney(amountText)
   const amountError =
-    amountText.trim() === '' ? null
+    !target || amountText.trim() === '' ? null
     : amount === null || toCents(amount) <= 0n ? 'Enter an amount above zero'
     : compareMoney(amount, target.amount) > 0 ? `At most ${money(target.amount, cur)} can go back on ${target.methodName}`
     : null
-  const valid = amount !== null && toCents(amount) > 0n && amountError === null && reasonOk(reason)
+  const valid = target !== undefined && amount !== null && toCents(amount) > 0n && amountError === null && reasonOk(reason)
 
   return (
     <form
@@ -175,11 +203,12 @@ function RefundForm({ bill, busy, onRefund }: { bill: Bill; busy: boolean; onRef
         if (valid) setConfirming(true)
       }}
     >
+      {noticeLine}
       <div className="flex flex-col gap-1.5">
         <p id="refund-method-label" className="t-meta text-fg2">Paid with</p>
         <div role="radiogroup" aria-labelledby="refund-method-label" className="flex flex-wrap gap-2">
           {options.map((o) => {
-            const selected = o.methodId === target.methodId
+            const selected = o.methodId === target?.methodId
             return (
               <button
                 key={o.methodId}
@@ -188,8 +217,11 @@ function RefundForm({ bill, busy, onRefund }: { bill: Bill; busy: boolean; onRef
                 aria-checked={selected}
                 disabled={busy}
                 onClick={() => {
-                  setMethodId(o.methodId)
+                  // Choosing is deciding: pin the refund to the bill as it is now.
+                  setChosen({ methodId: o.methodId, methodName: o.methodName })
+                  setVersion(bill.version)
                   setAmountText(o.amount)
+                  setNotice(null)
                 }}
                 className={
                   selected
@@ -209,10 +241,10 @@ function RefundForm({ bill, busy, onRefund }: { bill: Bill; busy: boolean; onRef
         autoComplete="off"
         prefix={currencySymbol(cur)}
         value={amountText}
-        disabled={busy}
+        disabled={busy || !target}
         onChange={(e) => acceptMoney(e.target.value) && setAmountText(e.target.value)}
         error={amountError}
-        hint={`Up to ${money(target.amount, cur)} on ${target.methodName}`}
+        hint={target ? `Up to ${money(target.amount, cur)} on ${target.methodName}` : 'Choose the method the money goes back on'}
         className="t-amount-lg h-14"
       />
       <ReasonField value={reason} onChange={setReason} placeholder={correction ? 'e.g. Charged the wrong card' : 'e.g. Dish returned'} disabled={busy} />
@@ -221,15 +253,15 @@ function RefundForm({ bill, busy, onRefund }: { bill: Bill; busy: boolean; onRef
       </Button>
 
       <ConfirmDialog
-        open={confirming && amount !== null}
+        open={confirming && valid && amount !== null}
         onOpenChange={setConfirming}
         title={`Refund ${amount !== null ? money(amount, cur) : ''}?`}
-        message={`${amount !== null ? money(amount, cur) : ''} goes back to the guest on ${target.methodName}. This can't be undone.`}
+        message={`${amount !== null ? money(amount, cur) : ''} goes back to the guest on ${target?.methodName ?? ''}. This can't be undone.`}
         confirmLabel="Refund"
         destructive
         loading={busy}
         onConfirm={() => {
-          if (amount !== null) onRefund(target, amount, reason.trim())
+          if (target && amount !== null && !busy) onRefund(target, amount, reason.trim(), version)
         }}
       />
     </form>

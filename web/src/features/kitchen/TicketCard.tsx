@@ -1,6 +1,6 @@
 import { StickyNote } from 'lucide-react'
 import { motion } from 'motion/react'
-import { memo, useEffect, useId, useRef } from 'react'
+import { memo, useId } from 'react'
 import type { Ticket } from '@/api/types'
 import { clock, time } from '@/lib/format'
 import { Button } from '@/ui/Button'
@@ -21,9 +21,6 @@ interface TicketCardProps {
   /** The transition in flight for this ticket, if any. */
   busyTo: TransitionTarget | undefined
   onAction: (ticket: Ticket, to: TransitionTarget) => void
-  /** Take keyboard focus when mounted (the ticket just moved lanes under the user's hands). */
-  focusOnMount?: boolean
-  onFocused?: () => void
 }
 
 /**
@@ -31,24 +28,15 @@ interface TicketCardProps {
  * for the next step (Android TicketCard). Only the timer and urgency bar read the ticking
  * clock, so the per-second tick redraws those two small pieces rather than the card.
  */
-export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, busyTo, onAction, focusOnMount, onFocused }: TicketCardProps) {
+export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, busyTo, onAction }: TicketCardProps) {
   const titleId = useId()
   const done = laneOf(ticket) === 'done'
   const primary = primaryAction(ticket)
   const secondary = secondaryAction(ticket)
   const showActions = canUpdate && canAct(ticket) && primary !== null
-  const inner = useRef<HTMLElement | null>(null)
-
-  useEffect(() => {
-    if (focusOnMount && inner.current) {
-      inner.current.focus({ preventScroll: false })
-      onFocused?.()
-    }
-  }, [focusOnMount, onFocused])
-
   return (
     <motion.article
-      ref={inner}
+      data-ticket-id={ticket.id}
       layout="position"
       layoutId={`ticket-${ticket.id}`}
       initial={{ opacity: 0, y: 8 }}
@@ -58,13 +46,13 @@ export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, bu
       tabIndex={-1}
       aria-labelledby={titleId}
       aria-busy={busyTo ? true : undefined}
-      className="shrink-0 overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-card outline-none focus-visible:shadow-[0_0_0_2px_var(--background),0_0_0_4px_var(--accent)]"
+      className="@container/card shrink-0 overflow-hidden rounded-[var(--radius-lg)] border border-line bg-surface shadow-card outline-none focus-visible:shadow-[0_0_0_2px_var(--background),0_0_0_4px_var(--accent)]"
     >
       {done ? <div aria-hidden className={cn('h-1.5', TONE[ticketVisual(ticket.status).tone].stripe)} /> : <UrgencyBar ticket={ticket} />}
       <div className="p-4">
         <header className="flex items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h3 id={titleId} className="t-table-label truncate text-fg lg:text-[28px] lg:leading-8">{ticket.table_name}</h3>
+            <h3 id={titleId} className="t-table-label truncate text-fg lg:@min-[320px]/card:text-[28px] lg:@min-[320px]/card:leading-8">{ticket.table_name}</h3>
             <p className="t-identifier truncate text-fg2">Check #{ticket.order_number}</p>
             <p className="t-meta truncate text-fg3">Ticket {ticket.ticket_number} · {ticket.server_name}</p>
             <OrderFlag ticket={ticket} />
@@ -81,13 +69,13 @@ export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, bu
               <li key={item.id} className="flex items-start gap-2 py-1.5">
                 {voided && <span className="sr-only">Voided: </span>}
                 <span
-                  className={cn('t-section w-10 shrink-0 tabular-nums lg:text-[22px] lg:leading-7', voided ? 'text-fg3 line-through' : 'text-accent')}
+                  className={cn('t-section w-10 shrink-0 tabular-nums lg:@min-[320px]/card:text-[22px] lg:@min-[320px]/card:leading-7', voided ? 'text-fg3 line-through' : 'text-accent')}
                 >
                   {item.quantity}×
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className={cn('t-section break-words lg:text-[22px] lg:leading-7', voided ? 'text-fg3 line-through' : 'text-fg')}>{item.name}</span>
+                    <span className={cn('t-section break-words lg:@min-[320px]/card:text-[22px] lg:@min-[320px]/card:leading-7', voided ? 'text-fg3 line-through' : 'text-fg')}>{item.name}</span>
                     {voided && (
                       <span className="t-status rounded-[var(--radius-xs)] bg-danger-soft px-1.5 py-0.5 text-danger" aria-hidden>VOID</span>
                     )}
@@ -112,13 +100,13 @@ export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, bu
         )}
 
         {showActions && primary && (
-          <div className="mt-4 flex gap-3">
+          <div className="mt-4 flex flex-wrap gap-3">
             {secondary && (
               <Button
                 variant="secondary"
                 size="lg"
                 icon={secondary.icon}
-                className="h-14 min-w-0 flex-1"
+                className="h-14 min-w-fit shrink-0 px-4!"
                 disabled={busyTo !== undefined && busyTo !== secondary.to}
                 loading={busyTo === secondary.to}
                 onClick={() => onAction(ticket, secondary.to)}
@@ -130,8 +118,9 @@ export const TicketCard = memo(function TicketCard({ ticket, zone, canUpdate, bu
             <Button
               variant="primary"
               size="lg"
+              data-primary=""
               icon={primary.icon}
-              className="h-14 min-w-0 flex-[1.6]"
+              className="h-14 min-w-fit flex-1 px-4!"
               disabled={busyTo !== undefined && busyTo !== primary.to}
               loading={busyTo === primary.to}
               onClick={() => onAction(ticket, primary.to)}
@@ -160,7 +149,7 @@ function TicketTimer({ ticket }: { ticket: Ticket }) {
   return (
     <div className="shrink-0 text-right">
       <span className="sr-only">{timerDescription(ticket, now)}</span>
-      <div aria-hidden className={cn('t-metric whitespace-nowrap transition-colors duration-[240ms] lg:text-[36px] lg:leading-10', calm ? 'text-fg' : toneText)}>
+      <div aria-hidden className={cn('t-metric whitespace-nowrap transition-colors duration-[240ms] lg:@min-[320px]/card:text-[36px] lg:@min-[320px]/card:leading-10', calm ? 'text-fg' : toneText)}>
         {clock(timerStart(ticket), now)}
       </div>
       <div aria-hidden className={cn('t-status mt-0.5 whitespace-nowrap', calm ? 'text-fg3' : toneText)}>

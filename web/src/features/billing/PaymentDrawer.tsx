@@ -14,6 +14,12 @@ import { AmountLine } from '@/ui/Page'
 import { ErrorState, Skeleton } from '@/ui/States'
 import { quickTenders, subtractMoney, toCents } from './billMath'
 
+/** The bill as our own charge settled it, and the change to hand back from our own tender. */
+export interface Settled {
+  bill: Bill
+  change: string | null
+}
+
 export interface Charge {
   method: PaymentMethod
   amount: string
@@ -39,12 +45,13 @@ export function sortMethods(methods: readonly PaymentMethod[]): PaymentMethod[] 
 
 /**
  * Take payment (Android PaymentSheet). Locked while a charge is in flight; switches to the
- * "Paid in full" state when the bill settles, with the change to hand back.
+ * "Paid in full" state when this client's own charge settles the bill, with the change to
+ * hand back.
  */
 export function PaymentDrawer({ open, bill, settled, busy, methods, onClose, onCharge }: {
   open: boolean
   bill: Bill
-  settled: Bill | null
+  settled: Settled | null
   busy: boolean
   methods: UseQueryResult<PaymentMethod[], ApiError>
   onClose: () => void
@@ -60,7 +67,7 @@ export function PaymentDrawer({ open, bill, settled, busy, methods, onClose, onC
       width={480}
       footer={settled ? <Button size="lg" className="w-full" onClick={onClose} autoFocus>Done</Button> : undefined}
     >
-      {settled ? <PaidInFull bill={settled} /> : <PaymentForm bill={bill} busy={busy} methods={methods} onCharge={onCharge} />}
+      {settled ? <PaidInFull settled={settled} /> : <PaymentForm bill={bill} busy={busy} methods={methods} onCharge={onCharge} />}
     </Drawer>
   )
 }
@@ -244,10 +251,8 @@ function TenderChips({ label, labelledBy, options }: {
 }
 
 /** The settled moment: a check that draws itself, and the change to hand back if any. */
-function PaidInFull({ bill }: { bill: Bill }) {
+function PaidInFull({ settled: { bill, change } }: { settled: Settled }) {
   const cur = bill.currency_code
-  const last = [...bill.payments].reverse().find((p) => p.kind === 'PAYMENT')
-  const change = last && last.tendered !== null && toCents(last.change_due) > 0n ? last.change_due : null
   return (
     <div role="status" className="flex flex-col items-center py-8 text-center">
       <motion.svg

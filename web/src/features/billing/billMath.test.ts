@@ -156,11 +156,11 @@ describe('payment intents', () => {
   it('replays a retry of the same charge, but a new version or amount is a new intent', () => {
     const keys = new IntentKey()
     const charge = { methodId: 1, amount: '200.00', tendered: '500.00', reference: null }
-    const first = keys.keyFor(payFingerprint({ id: 7, version: 3 }, charge))
-    expect(keys.keyFor(payFingerprint({ id: 7, version: 3 }, charge))).toBe(first)
-    expect(keys.keyFor(payFingerprint({ id: 7, version: 4 }, charge))).not.toBe(first)
-    const v4 = keys.keyFor(payFingerprint({ id: 7, version: 4 }, charge))
-    expect(keys.keyFor(payFingerprint({ id: 7, version: 4 }, { ...charge, amount: '201.00' }))).not.toBe(v4)
+    const first = keys.keyFor(payFingerprint(7, 3, charge))
+    expect(keys.keyFor(payFingerprint(7, 3, charge))).toBe(first)
+    expect(keys.keyFor(payFingerprint(7, 4, charge))).not.toBe(first)
+    const v4 = keys.keyFor(payFingerprint(7, 4, charge))
+    expect(keys.keyFor(payFingerprint(7, 4, { ...charge, amount: '201.00' }))).not.toBe(v4)
   })
 
   it('drops the key only when the server definitively refused', () => {
