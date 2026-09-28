@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/inter";
+
+/*
+ * Bistro design tokens — the same semantic palette as the Android app (Color.kt), for the
+ * same three appearances. Components use these names only; nothing hard-codes a hex value.
+ */
+:root,
+[data-appearance="light"] {
+  color-scheme: light;
+  --background: #F6F3EE; --surface: #FFFFFF; --surface-raised: #FFFFFF; --surface-sunken: #EFEAE3;
+  --border: #E7E1D8; --border-strong: #D4CCC0;
+  --text-primary: #1A1814; --text-secondary: #5C574F; --text-tertiary: #716B62; --text-disabled: #B8B2A8;
+  --ink: #1C1A16; --on-ink: #FBF9F6;
+  --accent: #A8471B; --accent-soft: #FBE7DD; --on-accent: #FFFFFF;
+  --success: #17744A; --success-soft: #DFF3E8;
+  --warning: #8F5C0E; --warning-soft: #FBEFD6;
+  --danger: #B02E25; --danger-soft: #FBE2DF;
+  --info: #3F4DB8; --info-soft: #E5E8FB;
+  --neutral: #5E5A54; --neutral-soft: #EDEAE5;
+  --cleaning: #0A737C; --cleaning-soft: #DDF2F3;
+  --scrim: rgb(18 15 10 / 0.40);
+  --shadow: rgb(43 33 21 / 0.12);
+  --elevation: 0 1px 2px rgb(43 33 21 / 0.06), 0 6px 16px -6px rgb(43 33 21 / 0.14);
+  --elevation-lg: 0 24px 48px -16px rgb(43 33 21 / 0.28);
+  --hover-overlay: color-mix(in srgb, var(--text-primary) 5%, transparent);
+  --press-overlay: color-mix(in srgb, var(--text-primary) 10%, transparent);
+}
+
+[data-appearance="dark"] {
+  color-scheme: dark;
+  --background: #141311; --surface: #1D1C19; --surface-raised: #262421; --surface-sunken: #100F0D;
+  --border: #302D29; --border-strong: #45413B;
+  --text-primary: #F3F0EA; --text-secondary: #B7B1A7; --text-tertiary: #8A847A; --text-disabled: #5A564F;
+  --ink: #F3F0EA; --on-ink: #171512;
+  --accent: #F07A45; --accent-soft: #3A2419; --on-accent: #1A0E08;
+  --success: #46C98A; --success-soft: #16301F;
+  --warning: #F0B44C; --warning-soft: #342812;
+  --danger: #F26B5E; --danger-soft: #3A1B18;
+  --info: #8C98FF; --info-soft: #1F2340;
+  --neutral: #A29C92; --neutral-soft: #2A2825;
+  --cleaning: #45C7D0; --cleaning-soft: #12292B;
+  --scrim: rgb(0 0 0 / 0.60);
+  --shadow: rgb(0 0 0 / 0.40);
+  --elevation: none;
+  --elevation-lg: 0 24px 48px -16px rgb(0 0 0 / 0.6);
+  --hover-overlay: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --press-overlay: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+/* True black for OLED: surfaces separate by hairlines, never by tone or shadow. */
+[data-appearance="black"] {
+  color-scheme: dark;
+  --background: #000000; --surface: #0A0A0A; --surface-raised: #131313; --surface-sunken: #000000;
+  --border: #242424; --border-strong: #383838;
+  --text-primary: #F5F3EF; --text-secondary: #B3AEA6; --text-tertiary: #8A847A; --text-disabled: #5A564F;
+  --ink: #F3F0EA; --on-ink: #171512;
+  --accent: #F07A45; --accent-soft: #2B170D; --on-accent: #1A0E08;
+  --success: #46C98A; --success-soft: #0C2215;
+  --warning: #F0B44C; --warning-soft: #261B08;
+  --danger: #F26B5E; --danger-soft: #2A100D;
+  --info: #8C98FF; --info-soft: #141733;
+  --neutral: #A29C92; --neutral-soft: #1A1A1A;
+  --cleaning: #45C7D0; --cleaning-soft: #081C1E;
+  --scrim: rgb(0 0 0 / 0.70);
+  --shadow: transparent;
+  --elevation: none;
+  --elevation-lg: 0 0 0 1px var(--border-strong);
+  --hover-overlay: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  --press-overlay: color-mix(in srgb, var(--text-primary) 12%, transparent);
+}
+
+@theme inline {
+  --color-bg: var(--background);
+  --color-surface: var(--surface);
+  --color-raised: var(--surface-raised);
+  --color-sunken: var(--surface-sunken);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+  --color-fg: var(--text-primary);
+  --color-fg2: var(--text-secondary);
+  --color-fg3: var(--text-tertiary);
+  --color-fg-disabled: var(--text-disabled);
+  --color-ink: var(--ink);
+  --color-on-ink: var(--on-ink);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-neutral: var(--neutral);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-cleaning: var(--cleaning);
+  --color-cleaning-soft: var(--cleaning-soft);
+  --color-scrim: var(--scrim);
+  --font-display: "Manrope Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --radius-xs: 6px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-xl: 28px;
+  --shadow-card: var(--elevation);
+  --shadow-float: var(--elevation-lg);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-decel: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-accel: cubic-bezier(0.3, 0, 0.8, 0.15);
+}
+
+/* Typography roles (Type.kt). Screens pick a role, never a raw size. */
+@utility t-display { font-family: var(--font-display); font-weight: 700; font-size: 34px; line-height: 40px; letter-spacing: -0.02em; }
+@utility t-page-title { font-family: var(--font-display); font-weight: 700; font-size: 26px; line-height: 32px; letter-spacing: -0.015em; }
+@utility t-section { font-family: var(--font-display); font-weight: 600; font-size: 18px; line-height: 24px; letter-spacing: -0.01em; }
+@utility t-card-title { font-family: var(--font-display); font-weight: 600; font-size: 16px; line-height: 22px; }
+@utility t-table-label { font-family: var(--font-display); font-weight: 800; font-size: 22px; line-height: 26px; letter-spacing: -0.02em; }
+@utility t-identifier { font-family: var(--font-sans); font-weight: 600; font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-body { font-family: var(--font-sans); font-weight: 400; font-size: 15px; line-height: 22px; }
+@utility t-body-strong { font-family: var(--font-sans); font-weight: 600; font-size: 15px; line-height: 22px; }
+@utility t-support { font-family: var(--font-sans); font-weight: 400; font-size: 13px; line-height: 18px; }
+@utility t-meta { font-family: var(--font-sans); font-weight: 500; font-size: 12px; line-height: 16px; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-status { font-family: var(--font-sans); font-weight: 600; font-size: 11px; line-height: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+@utility t-button { font-family: var(--font-sans); font-weight: 600; font-size: 15px; line-height: 20px; letter-spacing: 0.005em; }
+@utility t-amount-hero { font-family: var(--font-display); font-weight: 800; font-size: 40px; line-height: 46px; letter-spacing: -0.025em; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-amount-lg { font-family: var(--font-display); font-weight: 700; font-size: 22px; line-height: 28px; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-amount { font-family: var(--font-sans); font-weight: 600; font-size: 15px; line-height: 22px; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-amount-sm { font-family: var(--font-sans); font-weight: 500; font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums lining-nums; }
+@utility t-metric { font-family: var(--font-display); font-weight: 800; font-size: 28px; line-height: 32px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums lining-nums; }
+
+@media (min-width: 1280px) {
+  .t-page-title { font-size: 28px; line-height: 34px; }
+  .t-amount-hero { font-size: 44px; line-height: 50px; }
+}
+
+@layer base {
+  html, body { background: var(--background); color: var(--text-primary); }
+  body { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  ::selection { background: var(--accent-soft); color: var(--text-primary); }
+  :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--background), 0 0 0 4px var(--accent); border-radius: 10px; }
+  * { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  button { cursor: pointer; }
+  button:disabled { cursor: not-allowed; }
+}
+
+/* Motion is short and purposeful; with reduced motion it is essentially off. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; scroll-behavior: auto !important; }
+}
+
+@keyframes shimmer { from { background-position: -400px 0; } to { background-position: 400px 0; } }
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-sunken) 0px, var(--surface-raised) 160px, var(--surface-sunken) 320px);
+  background-size: 800px 100%;
+  animation: shimmer 1.3s linear infinite;
+}
+
+:root { --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238A847A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); }
+
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+.page-enter { animation: rise-in 240ms var(--ease-decel) both; }
+
+/* Sign-in hero: ember glow over a hairline floor plan (same concept as the Android hero). */
+.login-hero { background: linear-gradient(180deg, #1C1712 0%, #2A1D14 100%); }
+[data-appearance="dark"] .login-hero, [data-appearance="black"] .login-hero { background: linear-gradient(180deg, #1B140F 0%, #0F0B08 100%); }
+@media (max-width: 1023px) {
+  .login-hero { background: linear-gradient(180deg, #1C1712 0%, #2A1D14 70%, var(--background) 100%); }
+  [data-appearance="dark"] .login-hero, [data-appearance="black"] .login-hero { background: linear-gradient(180deg, #1B140F 0%, #150F0B 70%, var(--background) 100%); }
+}
+.login-floorplan {
+  opacity: 0.9;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='184' height='184' fill='none' stroke='%23ffffff' stroke-opacity='0.055' stroke-width='1.3'%3E%3Ccircle cx='46' cy='46' r='18'/%3E%3Ccircle cx='46' cy='19' r='5'/%3E%3Ccircle cx='46' cy='73' r='5'/%3E%3Ccircle cx='19' cy='46' r='5'/%3E%3Ccircle cx='73' cy='46' r='5'/%3E%3Crect x='123' y='31' width='30' height='30' rx='5'/%3E%3Crect x='31' y='123' width='30' height='30' rx='5'/%3E%3Ccircle cx='138' cy='138' r='18'/%3E%3Ccircle cx='138' cy='111' r='5'/%3E%3Ccircle cx='138' cy='165' r='5'/%3E%3Ccircle cx='111' cy='138' r='5'/%3E%3Ccircle cx='165' cy='138' r='5'/%3E%3C/svg%3E");
+  mask-image: linear-gradient(180deg, black 55%, transparent 100%);
+}
+.login-glow {
+  background:
+    radial-gradient(60% 50% at 78% 18%, rgb(224 112 60 / 0.55), transparent 70%),
+    radial-gradient(45% 40% at 12% 82%, rgb(244 184 96 / 0.18), transparent 70%);
+  animation: ember-drift 18s ease-in-out infinite alternate;
+}
+@keyframes ember-drift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(-4%, 3%, 0) scale(1.06); } }

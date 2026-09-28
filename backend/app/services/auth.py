@@ -91,12 +91,15 @@ def _issue(db: Session, user: User, session: AuthSession) -> TokenPair:
     )
 
 
-def start_session(db: Session, user: User, device_label: str | None) -> TokenPair:
+def start_session(db: Session, user: User, device_label: str | None,
+                  client: str = "mobile") -> TokenPair:
     settings = get_settings()
+    ttl = settings.web_session_ttl_seconds if client == "web" else settings.refresh_token_ttl_seconds
     session = AuthSession(
         user_id=user.id,
-        expires_at=_now() + timedelta(seconds=settings.refresh_token_ttl_seconds),
+        expires_at=_now() + timedelta(seconds=ttl),
         device_label=device_label,
+        client=client,
     )
     db.add(session)
     db.flush()
@@ -104,7 +107,7 @@ def start_session(db: Session, user: User, device_label: str | None) -> TokenPai
 
 
 def login(db: Session, username: str, password: str, device_label: str | None,
-          client_ip: str) -> TokenPair:
+          client_ip: str, client: str = "mobile") -> TokenPair:
     key = f"login:{username.lower()}:{client_ip}"
     ip_key = f"login-ip:{client_ip}"
     _check_throttle(db, ip_key)
@@ -121,8 +124,8 @@ def login(db: Session, username: str, password: str, device_label: str | None,
     if upgraded:
         user.password_hash = upgraded
     user.last_login_at = _now()
-    pair = start_session(db, user, device_label)
-    log.info("login", user_id=user.id)
+    pair = start_session(db, user, device_label, client)
+    log.info("login", user_id=user.id, client=client)
     return pair
 
 
@@ -139,6 +142,12 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
     now = _now()
     if session is None or session.revoked_at is not None or session.expires_at <= now:
         raise Unauthenticated("Your session has ended. Sign in again.")
+    if session.client == "web" and now - session.last_used_at > timedelta(
+            seconds=get_settings().web_idle_timeout_seconds):
+        # Idle browser on a shared PC: the next person must sign in themselves.
+        session.revoked_at = now
+        db.commit()
+        raise Unauthenticated("You were signed out after a period of inactivity.")
     if token.used_at is not None and now - token.used_at <= REFRESH_GRACE:
         # The client may be retrying a refresh whose response it never received (Wi-Fi
         # dropped mid-response). That is only plausible if the successor we issued has never
@@ -152,6 +161,8 @@ def refresh(db: Session, refresh_token: str) -> TokenPair:
             raise Unauthenticated("Your session has ended. Sign in again.")
         user = db.get(User, session.user_id)
         if user is None or not user.is_active:
+            session.revoked_at = now
+            db.commit()
             raise AccountInactive("This account has been deactivated.")
         # Exactly one chain survives: the unreceived successor is discarded.
         for s in successors:
@@ -200,7 +211,8 @@ def revoke_all_sessions(db: Session, user: User) -> None:
     user.token_version += 1
 
 
-def change_password(db: Session, user: User, current: str, new: str) -> TokenPair:
+def change_password(db: Session, user: User, current: str, new: str,
+                    client: str = "mobile") -> TokenPair:
     """Change the caller's password, sign out every other device, keep this one signed in."""
     key = f"password:{user.id}"
     _check_throttle(db, key)
@@ -219,4 +231,4 @@ def change_password(db: Session, user: User, current: str, new: str) -> TokenPai
     user.password_hash = hash_password(new)
     revoke_all_sessions(db, user)
     db.flush()
-    return start_session(db, user, None)
+    return start_session(db, user, None, client)

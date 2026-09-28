@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
@@ -32,9 +32,13 @@ def audit_logs(
     entity_type: Annotated[str | None, Query(max_length=32)] = None,
     action: Annotated[str | None, Query(max_length=64)] = None,
     actor_id: int | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> AuditPage:
+    """Newest first, cursor-paginated by `before_id`; optional [since, until) time window."""
     return insights.audit_logs(db, actor, before_id=before_id, entity_type=entity_type,
-                               action_prefix=action, actor_id=actor_id, limit=limit)
+                               action_prefix=action, actor_id=actor_id, limit=limit,
+                               since=since, until=until)
 
 

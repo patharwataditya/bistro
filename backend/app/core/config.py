@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     jwt_issuer: str = "bistro-api"
     access_token_ttl_seconds: int = 15 * 60
     refresh_token_ttl_seconds: int = 30 * 24 * 60 * 60
+    web_session_ttl_seconds: int = 12 * 60 * 60
+    web_idle_timeout_seconds: int = 2 * 60 * 60
+    # Exact origin of the web app (e.g. https://bistro.example.com). When unset, the request's
+    # own Host is used, which is correct for a same-origin deployment behind Caddy.
+    web_origin: str | None = None
     login_max_failures: int = 5
     login_lockout_seconds: int = 15 * 60
     cors_origins: list[str] = Field(default_factory=list)

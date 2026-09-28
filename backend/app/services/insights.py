@@ -253,7 +253,8 @@ def report(db: Session, actor: Actor, start: date, end: date) -> ReportOut:
 
 
 def audit_logs(db: Session, actor: Actor, *, before_id: int | None, entity_type: str | None,
-               action_prefix: str | None, actor_id: int | None, limit: int) -> AuditPage:
+               action_prefix: str | None, actor_id: int | None, limit: int,
+               since: datetime | None = None, until: datetime | None = None) -> AuditPage:
     stmt = (select(AuditLog, User.full_name).outerjoin(User, User.id == AuditLog.actor_id)
             .where(AuditLog.restaurant_id == actor.restaurant_id,
                    (AuditLog.location_id == actor.location_id) | AuditLog.location_id.is_(None)))
@@ -265,6 +266,10 @@ def audit_logs(db: Session, actor: Actor, *, before_id: int | None, entity_type:
         stmt = stmt.where(AuditLog.action.startswith(action_prefix, autoescape=True))
     if actor_id is not None:
         stmt = stmt.where(AuditLog.actor_id == actor_id)
+    if since is not None:
+        stmt = stmt.where(AuditLog.created_at >= since)
+    if until is not None:
+        stmt = stmt.where(AuditLog.created_at < until)
     rows = db.execute(stmt.order_by(AuditLog.id.desc()).limit(limit + 1)).all()
     items = [AuditLogOut(id=a.id, action=a.action, entity_type=a.entity_type,
                          entity_id=a.entity_id, summary=a.summary, actor_id=a.actor_id,

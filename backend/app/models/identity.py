@@ -108,6 +108,8 @@ class AuthSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     device_label: Mapped[str | None] = mapped_column(String(120))
+    # "mobile" or "web". Browser sessions are shorter-lived (shared restaurant PCs).
+    client: Mapped[str] = mapped_column(String(10), default="mobile", server_default="mobile")
 
 
 class RefreshToken(Base):

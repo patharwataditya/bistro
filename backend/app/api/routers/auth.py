@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Request, Response, status
 
 from app.api.deps import DB, CurrentActor
 from app.api.routing import TransactionalRoute
@@ -12,16 +12,18 @@ router = APIRouter(route_class=TransactionalRoute, tags=["auth"])
 
 
 @router.post("/auth/login", response_model=TokenPair)
-def login(body: LoginIn, db: DB, request: Request) -> TokenPair:
+def login(body: LoginIn, db: DB, request: Request, response: Response) -> TokenPair:
     """Exchange credentials for an access token (15 min) and a rotating refresh token.
     Repeated failures for a username from one address are throttled (429 RATE_LIMITED)."""
     client_ip = request.client.host if request.client else "unknown"
+    response.headers["Cache-Control"] = "no-store"
     return auth.login(db, body.username, body.password, body.device_label, client_ip)
 
 
 @router.post("/auth/refresh", response_model=TokenPair)
-def refresh(body: RefreshIn, db: DB) -> TokenPair:
+def refresh(body: RefreshIn, db: DB, response: Response) -> TokenPair:
     """Rotate the refresh token. Presenting an already-used token revokes the session."""
+    response.headers["Cache-Control"] = "no-store"
     return auth.refresh(db, body.refresh_token)
 
 
